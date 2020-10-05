@@ -325,8 +325,21 @@ def write_new_block(_data):
     return r, pos
 
 
+def data_check(_data):
+    global datastore
+    global hash_table
+
+    d = get_file_data([hash_data(_data)])
+
+    if hash_data(d) == hash_data(_data):
+        return True
+    else:
+        print("Data error at:" + str(hash_table[hash_data(_data)]))
+        return False
+
+
 # @lru_cache(maxsize=102400)
-def dedup(data, blk_size):
+def dedup(data, blk_size, check_integrity=True):
     global datastore
     global free_blocks
     global write_lock
@@ -346,6 +359,8 @@ def dedup(data, blk_size):
 
             if hashed_data in hash_table:
                 blk_list.append(hashed_data)
+                if check_integrity:
+                    data_ok = data_check(c)
 
             else:
                 if len(free_blocks) > 0:
@@ -364,6 +379,8 @@ def dedup(data, blk_size):
                 if r:
                     blk_list.append(hashed_data)
                     update_hash_table(_hash=hashed_data, _block=pos, _operation=1)
+                    if check_integrity:
+                        data_ok = data_check(c)
                 else:
                     raise IOError
 
@@ -418,10 +435,12 @@ def get_file_data(blklst):
         if b is not None:
             datastore.seek(hash_table[b])
             d = datastore.read(allocation_unit)
-            if hash_data(d) == b and d is not None:
+            if d is not None:
                 data += d
-            else:
-                raise IOError
+            # if hash_data(d) == b and d is not None:
+            #     data += d
+            # else:
+            #     raise IOError
             # if d is not None:
             #     data += d
     return data
