@@ -57,3 +57,13 @@ def humanbytes(B):
         return '{0:.2f} GB'.format(B / GB)
     elif TB <= B:
         return '{0:.2f} TB'.format(B / TB)
+
+
+def memory():
+    import os
+    from wmi import WMI
+    w = WMI('.')
+    result = w.query("SELECT WorkingSet FROM Win32_PerfRawData_PerfProc_Process WHERE IDProcess=%d" % os.getpid())
+    print(humanbytes(int(result[0].WorkingSet)))
+    return int(result[0].WorkingSet)
+

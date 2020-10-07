@@ -5,12 +5,14 @@ import mmap
 import hashlib
 import traceback
 import lzma
-from collections import OrderedDict
+from collections import OrderedDict, deque
+from cache import LRU
+import multiprocessing as mp
 import math
 from decimal import *
-from stats import Timer, humanbytes
+from stats import Timer, humanbytes, memory
 import struct
-from utils import compressed_pickle, decompress_pickle, decompress_lzma
+from compression import compressed_pickle, decompress_pickle, decompress_data, compress_data
 """A memory file system implemented on top of winfspy.
 
 Useful for testing and as a reference.
@@ -48,18 +50,19 @@ datastore = None
 key_index = {}
 hash_table = {}
 fs_meta = None
+free_blocks = []
 
-read_cache = OrderedDict()
 under_fetch_limit = 2
-over_fetch_limit = 20
+over_fetch_limit = 10
 cache_size = 20000  # Cache size in entries
+read_cache = LRU(maxlen=cache_size)
 
 key_index_path = ""
 datastore_path = ""
 fs_meta_path = ""
 hash_table_path = ""
+free_blocks_path = ""
 
-free_blocks = []
 write_buffer = 0
 # Buffer de escrita em multiplos da unidade de alocacao
 # sendo assim os arquivos serão persistidos a cada X blocos/unidades de alocacao, sendo X o write_buffer_size ou a cada
@@ -67,30 +70,27 @@ write_buffer = 0
 allocation_unit = 16384
 write_buffer_size = 100 * allocation_unit
 write_buffer_lifetime = 10
-gc_interval = 5  # Intervalo entre o final de uma operação de GC e o inicio de outra
-partition_size = 24  # Partion size in GB
+gc_interval = 15  # Intervalo entre o final de uma operação de GC e o inicio de outra
+partition_size = 4  # Partion size in GB
 compressor_threads = 10
-
-lzma_filters = [
-    {"id": lzma.FILTER_DELTA, "dist": 5},
-    {"id": lzma.FILTER_LZMA2, "preset": 3 | lzma.MODE_FAST},
-]
-
+compressed_file_system = None
 
 lock = threading.Lock()
 
-identity_string = b'VeratyFS v0.0.1 @InLineDedup,FixedStoreSize,GC\n'
+identity_string = b'VeratyFS@v0.0.1@InLineDedup,FixedStoreSize,GC,Compression,FixedBlockSize\n'
 
 
-def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None):
+def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _free_blocks=None, _partition_size=None):
     global key_index
     global datastore
+    global hash_table
+    global free_blocks
     global fs_meta
     global key_index_path
     global fs_meta_path
     global datastore_path
-    global hash_table
     global hash_table_path
+    global free_blocks_path
 #########################
     if _keys is None:
         key_index_path = "key_index.vfs"
@@ -107,23 +107,16 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None):
 
     if os.path.isfile(hash_table_path):
         hash_table = decompress_pickle(hash_table_path)
-#########################
-    if _datastore is None:
-        datastore_path = "datastore.bin"
-    else:
-        datastore_path = _datastore
 
-    if os.path.isfile(datastore_path):
-        ds = open(datastore_path, "r+b")
-        datastore = mmap.mmap(ds.fileno(), 0, access=mmap.ACCESS_WRITE)
+#########################
+    if _free_blocks is None:
+        free_blocks_path = "free_blocks.bin"
     else:
-        f = open(datastore_path, "wb")
-        f.write(identity_string)
-        f.flush()
-        f.close()
-        ds = open(datastore_path, "r+b")
-        datastore = mmap.mmap(ds.fileno(), 0, access=mmap.ACCESS_WRITE)
-        ds.close()
+        free_blocks_path = _free_blocks
+
+    if os.path.isfile(free_blocks_path):
+        free_blocks = decompress_pickle(free_blocks_path)
+
 ##########################
     if _fs_meta is None:
         fs_meta_path = "fs.meta"
@@ -132,6 +125,28 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None):
 
     if os.path.isfile(fs_meta_path):
         fs_meta = decompress_pickle(fs_meta_path)
+#########################
+    if _datastore is None:
+        datastore_path = "datastore.bin"
+    else:
+        datastore_path = _datastore
+
+    ds_size = partition_size * 1073741824
+    if os.path.isfile(datastore_path):
+        ds = open(datastore_path, "r+b")
+        datastore = mmap.mmap(ds.fileno(), length=ds_size, access=mmap.ACCESS_WRITE)
+        #datastore = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
+    else:
+        f = open(datastore_path, "wb")
+        f.write(identity_string)
+        f.flush()
+        f.close()
+        ds = open(datastore_path, "r+b")
+        datastore = mmap.mmap(ds.fileno(), length=ds_size, access=mmap.ACCESS_WRITE)
+        #datastore = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
+        ds.close()
+
+        free_blocks = list(range(0, ds_size, allocation_unit))
 
 
 def persist_data(fs_meta=None):
@@ -145,6 +160,7 @@ def persist_data(fs_meta=None):
     global write_lock
     global hash_table
     global hash_table_path
+    global free_blocks_path
     global lock
 
     lock.acquire()
@@ -157,6 +173,10 @@ def persist_data(fs_meta=None):
     h = hash_table.copy()
     compressed_pickle(hash_table_path, h)
     # pickle.dump(h, open(hash_table_path, "wb"))
+
+    f = free_blocks.copy()
+    compressed_pickle(free_blocks_path, f)
+
 
     #datastore.flush()  # TODO: Mudar para que sejam persistidas apenas as mudanças feitas
 
@@ -184,6 +204,9 @@ def get_usage():
     deduped_size = len(tmp)*allocation_unit
 
     del tmp
+
+    print("Undeduped Space Used : " + humanbytes(undeduped_size))
+    print("Deduped Space Used : " + humanbytes(deduped_size))
 
     return undeduped_size, deduped_size
 
@@ -280,15 +303,6 @@ def update_hash_table(_hash, _block=None, _operation=1):
     return True
 
 
-def compress_block(data):
-    return lzma.compress(data, filters=lzma_filters)
-
-
-def decompress_block(data):
-    return decompress_lzma(data)
-    # return lzma.decompress(data)
-
-
 def hash_data(_data):
     """
     Takes the raw data and calculates it's hash, returning the hexdigest (hex without the leading charecters x0)
@@ -298,19 +312,31 @@ def hash_data(_data):
     return hashlib.sha3_256(_data).hexdigest()
 
 
-def write_new_block(_data):
+def write_new_block(_data, _fixed_alloc=True):
     """
     Writes a new block to the datastore
+    :param _compression: Compression flag with compression to be used. See "compression.py"
     :param _data: data to be written
     :return: Tuple with the result of the operation and position (block) that the data has been written to
     """
     global datastore
 
     try:
-        datastore.resize(datastore.size()+len(_data))
-        datastore.seek(datastore.size()-len(_data))
-        pos = datastore.tell()
+        if compressed_file_system is not None:
+            try:
+                _data = compress_data(_data, compressed_file_system)
+            except Exception:
+                print(traceback.format_exc())
+        if _fixed_alloc:
+            pos = free_blocks.pop(0)
+            datastore.seek(pos)
+        else:
+            datastore.resize(datastore.size()+len(_data))
+            datastore.seek(datastore.size()-len(_data))
+            pos = datastore.tell()
+
         written = datastore.write(_data)
+
         if len(_data) == written:
             r = True
         else:
@@ -323,26 +349,28 @@ def write_new_block(_data):
     return r, pos
 
 
-def data_check(_data):
-    global datastore
-    global hash_table
+def data_check(_data, _hash):
+    """
+    Check a chunk of data against its hash
+    :param _data: data to be validated
+    :param _hash: _hash that the data is expect to conform to
+    :return: result of the validation check
+    """
 
-    d = get_file_data([hash_data(_data)])
-
-    if hash_data(d) == hash_data(_data):
+    if hash_data(_data) == _hash:
         return True
     else:
-        print("Data error at:" + str(hash_table[hash_data(_data)]))
+        print("Data does no conform to the specified hash")
         return False
 
 
-# @lru_cache(maxsize=102400)
 def dedup(data, blk_size, check_integrity=False):
     global datastore
     global free_blocks
     global write_lock
     global hash_table
     global lock
+    global compressed_file_system
 
     blk_list = []
     lock.acquire()
@@ -357,9 +385,6 @@ def dedup(data, blk_size, check_integrity=False):
 
             if hashed_data in hash_table:
                 blk_list.append(hashed_data)
-                if check_integrity:
-                    data_ok = data_check(c)
-
             else:
                 if len(free_blocks) > 0:
                     try:
@@ -370,15 +395,12 @@ def dedup(data, blk_size, check_integrity=False):
                     except ValueError:
                         free_blocks.pop(0)
                         r, pos = write_new_block(c)
-
                 else:
                     r, pos = write_new_block(c)
 
                 if r:
                     blk_list.append(hashed_data)
                     update_hash_table(_hash=hashed_data, _block=pos, _operation=1)
-                    if check_integrity:
-                        data_ok = data_check(c)
                 else:
                     raise IOError
 
@@ -407,32 +429,17 @@ def clip(value, lower, upper):
     return lower if value < lower else upper if value > upper else value
 
 
-def get_compressed_file_data(blklst):
+def get_file_data(blklst, start_block=None, end_block=None, check_integrity=False):
     global datastore
     global allocation_unit
     global hash_table
-
-    data = bytearray()
-    for b in blklst:
-        if b is not None:
-            datastore.seek(hash_table[b])
-            d = datastore.read(allocation_unit)
-            if d is not None:
-                data += decompress_block(d)
-    return data
-
-
-#@lru_cache(maxsize=cache_size)
-def get_file_data(blklst, start_block=None, end_block=None):
-    global datastore
-    global allocation_unit
-    global hash_table
+    global compressed_file_system
+    global read_cache
 
     data = bytearray()
     at_start = 0
     for idx, b in enumerate(blklst):
         if idx < start_block:
-            #data += bytearray(allocation_unit)
             at_start = at_start + 1
         elif idx > end_block:
             if at_start > 0:
@@ -458,17 +465,38 @@ def get_file_data(blklst, start_block=None, end_block=None):
         return data
 
 
+def seek_in_cache(_blk_hash):
+    try:
+        return read_cache[_blk_hash]
+    except KeyError:
+        return None
+
+
+def single_read(_hash, force=False):
+    global datastore
+    global allocation_unit
+    global hash_table
+
+    cur = hash_table[_hash]
+    if cur + allocation_unit > datastore.size():
+        to_read = datastore.size() - cur
+        datastore.seek(cur)
+        d = datastore.read(to_read - 1)
+    else:
+        datastore.seek(cur)
+        d = datastore.read(allocation_unit)
+
+    return d
+
+
 def chunks(lst, n):
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):
         yield lst[i:i + n]
 
-
-def compressed_chunks(lst, n):
-    """Yield successive n-sized chunks from lst."""
-    for i in range(0, len(lst), n):
-        yield compress_block(lst[i:i + n])
-
+""""
+FILE SYSTEM OPERATIONS
+"""
 
 def operation(fn):
     """Decorator for file system operations.
@@ -1086,7 +1114,7 @@ def create_memory_file_system(mountpoint, label="memfs", verbose=True, debug=Fal
     return fs
 
 
-def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_table, _key_index, _allocation_unit, _compression_type):
+def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_table, _free_blocks, _key_index, _allocation_unit, _compression_type):
     global fs_meta
     global write_lock
     global write_buffer
@@ -1095,11 +1123,15 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
     global allocation_unit
     global partition_size
     global lock
+    global compressed_file_system
+
+    if _compression_type is not None:
+        compressed_file_system = _compression_type
 
     try:
         partition_size = _size
         allocation_unit = _allocation_unit
-        init_persistance(fs_meta, _key_index, _datastore, _hash_table)
+        init_persistance(fs_meta, _key_index, _datastore, _hash_table, _free_blocks, _size)
     except Exception:
         print("Error initializing persistance. Please check file names and paths provided")
 
@@ -1118,10 +1150,17 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
             if time.time() - last_gc > gc_interval and not lock.locked():
                 # garbage_collector()
                 persist_data(fs.operations.get_entries())
-                # u, d = get_usage()
-                # print("Undeduped Space Used : " + humanbytes(u))
-                # print("Deduped Space Used : " + humanbytes(d))
+                u, d = get_usage()
+                mem = memory()
+                print("-------------------")
+                #print("Undeduped Space Used : " + humanbytes(u))
+                #print("Deduped Space Used : " + humanbytes(d))
+                print("Used Memory:" + humanbytes(mem))
                 last_gc = time.time()
+
+                # usage = mp.Process(target=get_usage, args=())
+                # usage.start()
+                # usage.join()
 
     finally:
         print("Stopping FS")
@@ -1130,6 +1169,7 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
 
 
 if __name__ == "__main__":
+    mp.set_start_method('spawn')
     parser = argparse.ArgumentParser()
     parser.add_argument("mountpoint")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -1137,11 +1177,12 @@ if __name__ == "__main__":
     parser.add_argument("-l", "--label", type=str, default="VeratyFS")
     parser.add_argument("-m", "--meta", type=str, default=None)
     parser.add_argument("-t", "--datastore", type=str, default=None)
-    parser.add_argument("-s", "--size", type=int, default=16)  # Size in GB
+    parser.add_argument("-s", "--size", type=int, default=4)  # Size in GB
     parser.add_argument("-k", "--keys", type=str, default=None)
     parser.add_argument("-a", "--hash", type=str, default=None)
-    parser.add_argument("-u", "--allocation_unit", type=int, default=16384)
+    parser.add_argument("-f", "--free_blocks", type=str, default=None)
+    parser.add_argument("-u", "--allocation_unit", type=int, default=4096)  # Allocation Unit in Bytes
     parser.add_argument("-c", "--compression_type", type=str, default=None)
     args = parser.parse_args()
     main(args.mountpoint, args.label, args.verbose, args.debug, args.meta, args.datastore, args.size, args.hash,
-         args.keys, args.allocation_unit, args.compression_type)
+         args.free_blocks, args.keys, args.allocation_unit, args.compression_type)
