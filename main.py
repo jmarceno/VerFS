@@ -9,6 +9,7 @@ from collections import OrderedDict
 import math
 from decimal import *
 from stats import Timer, humanbytes
+import struct
 from utils import compressed_pickle, decompress_pickle, decompress_lzma
 """A memory file system implemented on top of winfspy.
 
@@ -422,36 +423,39 @@ def get_compressed_file_data(blklst):
 
 
 #@lru_cache(maxsize=cache_size)
-def get_file_data(blklst):
+def get_file_data(blklst, start_block=None, end_block=None):
     global datastore
     global allocation_unit
     global hash_table
 
     data = bytearray()
-    for b in blklst:
-        if b is not None:
+    at_start = 0
+    for idx, b in enumerate(blklst):
+        if idx < start_block:
+            #data += bytearray(allocation_unit)
+            at_start = at_start + 1
+        elif idx > end_block:
+            if at_start > 0:
+                return bytearray(at_start*allocation_unit)+data
+            else:
+                return data
+        else:
             cur = hash_table[b]
-            if cur > datastore.size():
-                print("FUCKED UP SHIIT DUDE")
-                sys.exit(666)
             if cur+allocation_unit > datastore.size():
                 to_read = datastore.size() - cur
                 datastore.seek(cur)
                 d = datastore.read(to_read-1)
-                # print("Over Read of file...this is not cool")
             else:
                 datastore.seek(cur)
                 d = datastore.read(allocation_unit)
 
             if d is not None:
                 data += d
-            # if hash_data(d) == b and d is not None:
-            #     data += d
-            # else:
-            #     raise IOError
-            # if d is not None:
-            #     data += d
-    return data
+
+    if at_start > 0:
+        return bytearray(at_start * allocation_unit) + data
+    else:
+        return data
 
 
 def chunks(lst, n):
@@ -566,11 +570,6 @@ class FileObj(BaseFileObj):
         self.attributes |= FILE_ATTRIBUTE.FILE_ATTRIBUTE_ARCHIVE
         assert not self.attributes & FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY
 
-    # def prepare_file_data(self):
-    #     # Reconstruindo o arquivo, assim que o read é chamado. LENTO. REESCREVER
-    #     return cached_read(self.blklst)
-    #     #return get_file_data(self.blklst)
-    #     ######
 
     @property
     def allocation_size(self):
@@ -604,74 +603,24 @@ class FileObj(BaseFileObj):
         self.file_size = file_size
 
     def read(self, offset, length):
-        # if offset >= self.file_size:
-        #     raise NTStatusEndOfFile()
-        # end_offset = min(self.file_size, offset + length)
-        # # data = self.prepare_file_data()
-        # data = get_file_data(self.blklst)
-        # return data[offset:end_offset]
-
         if offset >= self.file_size:
             raise NTStatusEndOfFile()
         end_offset = min(self.file_size, offset + length)
 
-        # == Start Blk and Start Diff
-        if offset > allocation_unit and offset != 0:  # Caso o offset seja maior que 0 e maior que a unidade de alocação, encontra o bloco, caso contrario, o bloco deve ser 0 (primeiro bloco)
-            start_blk = offset // allocation_unit  # Encontra o bloco inicial dividindo o mesmo pela unidade de alocação e arredondando para baixo.
-            start_blk = start_blk - 1
+        # START BLOCK --------
+        if offset != 0 and offset > allocation_unit:
+            start_block = (offset // allocation_unit)  # Bloco inicial.
         else:
-            start_blk = 0
-
-        if offset != 0 and offset % allocation_unit != 0:  # Caso haja resto na divisao, o bloco não deve ser lido por inteiro. Encontra-se quantos bytes daquele bloco devem ser lidos
-            start_diff = offset % allocation_unit
+            start_block = 0
+        # END BLOCK ----------
+        if end_offset != self.file_size:
+            end_block = (end_offset // allocation_unit)  # Bloco final.
         else:
-            start_diff = 0  # Caso o offset seja 0 ou a divisao seja exata, o bloco deve ser lido a partir do primeiro byte
+            end_block = len(self.blklst)
 
-        # == End Blk and End Diff
-        if end_offset != self.file_size:  # Caso o offset não seja igual ao tamanho do arquivo, encotra o bloco final e quantos bytes deste bloco devem ser lidos
-            end_blk = int(Decimal(end_offset / allocation_unit).to_integral(rounding=ROUND_FLOOR))  # Encontra o bloco final dividindo o mesmo pela unidade de alocação e arredondando para baixo.
+        data = get_file_data(self.blklst, start_block, end_block)
 
-            if end_offset != 0 and end_offset % allocation_unit != 0:  # Caso haja resto na divisao, o bloco não deve ser lido por inteiro. Encontra-se quantos bytes daquele bloco devem ser lidos
-                #  end_blk = end_blk + 1 ???
-                end_diff = end_offset % allocation_unit  # Encontra quantos bytes do ultimo bloco devem ser lidos, através do resto da divisão entre o end_offset e a allocation unit
-            else:
-                end_diff = 0  # Caso o end_offset seja 0 ou a divisao seja exata, o bloco deve ser lido até o último byte
-        else:
-            end_blk = len(self.blklst)-1  # Caso o end_offset seja do tamanho do arquivo, o mesmo deve ser lido até o último bloco
-            end_diff = 0
-
-        if start_blk != end_blk:
-            data = get_file_data(self.blklst[start_blk:end_blk])  # Caso "normal", quando os blocos de inicio e fim sao diferentes
-        else:
-            data = get_file_data((self.blklst[start_blk:start_blk+1]))  # Caso o bloco de inicio seja o mesmo que o final. Le apenas 1 bloco. O +1 é devido a como funcionam as listas em python
-
-        #if start_blk == end_blk:
-        #  data = data[:length]  # Confina o tamanho dos dados ao tamanho do parametro lenght caso haja apenas um bloco
-        if end_diff > 0 or start_diff > 0:
-            #print("01")
-            data = data[start_diff:min(len(data)-end_diff, length)]
-        else:
-            if end_offset == self.file_size:
-                print("02")
-                try:
-                    data = data[((end_offset-offset)*-1)]
-                except IndexError:
-                    print("------------")
-                    print(str(len(data)))
-                    print(str((end_offset-offset)*1))
-                    print(str(end_offset))
-                    print(str(offset))
-            # else:
-            #     print("Data Index Error -> start_diff=" + str(start_diff) + "  end_diff=" + str(end_diff) + "  len(data)=" + str((len(data))) + " length= " + str(length))
-            #     sys.exit(1)
-
-        if type(data) == int:
-            data = bytes([data])
-
-        if len(data) > length:
-            print("wrong data size")
-
-        return data
+        return data[offset:end_offset]
 
     def write(self, buffer, offset, write_to_end_of_file):
         if write_to_end_of_file:
@@ -679,9 +628,7 @@ class FileObj(BaseFileObj):
         end_offset = offset + len(buffer)
         if end_offset > self.file_size:
             self.set_file_size(end_offset)
-        # self.data[offset:end_offset] = buffer
-        ###
-        # self.blklist = self.blklist + dedup(self.data[offset:end_offset], self.allocation_unit)
+
         self.blklst += dedup(bytes(buffer), allocation_unit)
         ###
         return len(buffer)
