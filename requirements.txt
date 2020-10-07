@@ -1,1 +1,3 @@
-winfspy
+cffi==1.14.3
+pycparser==2.20
+winfspy==0.8.1

@@ -57,11 +57,11 @@ over_fetch_limit = 10
 cache_size = 20000  # Cache size in entries
 read_cache = LRU(maxlen=cache_size)
 
-key_index_path = ""
-datastore_path = ""
-fs_meta_path = ""
-hash_table_path = ""
-free_blocks_path = ""
+key_index_path = os.path.join(os.getcwd(), 'metadata', "key_index.vfs")
+datastore_path = os.path.join(os.getcwd(), 'metadata', "datastore.bin")
+fs_meta_path = os.path.join(os.getcwd(), 'metadata', "fs.meta")
+hash_table_path = os.path.join(os.getcwd(), 'metadata', "hash_table.bin")
+free_blocks_path = os.path.join(os.getcwd(), 'metadata', "free_blocks.bin")
 
 write_buffer = 0
 # Buffer de escrita em multiplos da unidade de alocacao
@@ -74,6 +74,7 @@ gc_interval = 15  # Intervalo entre o final de uma operação de GC e o inicio d
 partition_size = 4  # Partion size in GB
 compressor_threads = 10
 compressed_file_system = None
+fixed_alloc = True
 
 lock = threading.Lock()
 
@@ -93,7 +94,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
     global free_blocks_path
 #########################
     if _keys is None:
-        key_index_path = "key_index.vfs"
+        key_index_path = os.path.join(os.getcwd(), 'metadata', "key_index.vfs")
     else:
         key_index_path = _keys
 
@@ -101,7 +102,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
         key_index = decompress_pickle(key_index_path)
 #########################
     if _hash is None:
-        hash_table_path = "hash_table.bin"
+        hash_table_path = os.path.join(os.getcwd(), 'metadata', "hash_table.bin")
     else:
         hash_table_path = _hash
 
@@ -110,7 +111,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
 
 #########################
     if _free_blocks is None:
-        free_blocks_path = "free_blocks.bin"
+        free_blocks_path = os.path.join(os.getcwd(), 'metadata', "free_blocks.bin")
     else:
         free_blocks_path = _free_blocks
 
@@ -119,7 +120,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
 
 ##########################
     if _fs_meta is None:
-        fs_meta_path = "fs.meta"
+        fs_meta_path = os.path.join(os.getcwd(), 'metadata', "fs.meta")
     else:
         fs_meta_path = _fs_meta
 
@@ -127,7 +128,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
         fs_meta = decompress_pickle(fs_meta_path)
 #########################
     if _datastore is None:
-        datastore_path = "datastore.bin"
+        datastore_path = os.path.join(os.getcwd(), 'metadata', "datastore.bin")
     else:
         datastore_path = _datastore
 
@@ -177,16 +178,13 @@ def persist_data(fs_meta=None):
     f = free_blocks.copy()
     compressed_pickle(free_blocks_path, f)
 
-
     #datastore.flush()  # TODO: Mudar para que sejam persistidas apenas as mudanças feitas
 
     _fs_meta = copy.deepcopy(fs_meta)
     compressed_pickle(fs_meta_path, _fs_meta)
     # pickle.dump(_fs_meta, open(fs_meta_path, "wb"))
 
-    write_buffer = write_buffer - temp_wr_buffer
     lock.release()
-
     return True
 
 
@@ -315,11 +313,13 @@ def hash_data(_data):
 def write_new_block(_data, _fixed_alloc=True):
     """
     Writes a new block to the datastore
+    :param _fixed_alloc: Specifies if the partition has pre-allocated space of grows as needed
     :param _compression: Compression flag with compression to be used. See "compression.py"
     :param _data: data to be written
     :return: Tuple with the result of the operation and position (block) that the data has been written to
     """
     global datastore
+    global fixed_alloc
 
     try:
         if compressed_file_system is not None:
@@ -327,9 +327,12 @@ def write_new_block(_data, _fixed_alloc=True):
                 _data = compress_data(_data, compressed_file_system)
             except Exception:
                 print(traceback.format_exc())
-        if _fixed_alloc:
-            pos = free_blocks.pop(0)
-            datastore.seek(pos)
+        if fixed_alloc:
+            try:
+                pos = free_blocks.pop(0)
+                datastore.seek(pos)
+            except IndexError:
+                raise NTStatusAccessDenied
         else:
             datastore.resize(datastore.size()+len(_data))
             datastore.seek(datastore.size()-len(_data))
@@ -442,27 +445,29 @@ def get_file_data(blklst, start_block=None, end_block=None, check_integrity=Fals
         if idx < start_block:
             at_start = at_start + 1
         elif idx > end_block:
-            if at_start > 0:
-                return bytearray(at_start*allocation_unit)+data
-            else:
-                return data
+            return at_start, data
         else:
-            cur = hash_table[b]
-            if cur+allocation_unit > datastore.size():
-                to_read = datastore.size() - cur
-                datastore.seek(cur)
-                d = datastore.read(to_read-1)
-            else:
-                datastore.seek(cur)
-                d = datastore.read(allocation_unit)
+            d = seek_in_cache(b)
+            if d is None:
+                cur = hash_table[b]
+                if cur+allocation_unit > datastore.size():
+                    to_read = datastore.size() - cur
+                    datastore.seek(cur)
+                    d = datastore.read(to_read-1)
+                else:
+                    datastore.seek(cur)
+                    d = datastore.read(allocation_unit)
+                    for i in range(0, over_fetch_limit+1):
+                        if datastore.tell() + allocation_unit > datastore.size():
+                            break
+                        dat = datastore.read(allocation_unit)
+                        read_cache[hash_data(dat)] = dat
+                read_cache[b] = d
 
             if d is not None:
                 data += d
 
-    if at_start > 0:
-        return bytearray(at_start * allocation_unit) + data
-    else:
-        return data
+    return at_start, data
 
 
 def seek_in_cache(_blk_hash):
@@ -497,6 +502,7 @@ def chunks(lst, n):
 """"
 FILE SYSTEM OPERATIONS
 """
+
 
 def operation(fn):
     """Decorator for file system operations.
@@ -646,9 +652,12 @@ class FileObj(BaseFileObj):
         else:
             end_block = len(self.blklst)
 
-        data = get_file_data(self.blklst, start_block, end_block)
+        at_start, data = get_file_data(self.blklst, start_block, end_block)
 
-        return data[offset:end_offset]
+        if at_start == 0:
+            return data[offset:end_offset]
+        else:
+            return (bytearray(1)*(allocation_unit*at_start)+data)[offset:end_offset]
 
     def write(self, buffer, offset, write_to_end_of_file):
         if write_to_end_of_file:
@@ -1181,7 +1190,7 @@ if __name__ == "__main__":
     parser.add_argument("-k", "--keys", type=str, default=None)
     parser.add_argument("-a", "--hash", type=str, default=None)
     parser.add_argument("-f", "--free_blocks", type=str, default=None)
-    parser.add_argument("-u", "--allocation_unit", type=int, default=4096)  # Allocation Unit in Bytes
+    parser.add_argument("-u", "--allocation_unit", type=int, default=16384)  # Allocation Unit in Bytes
     parser.add_argument("-c", "--compression_type", type=str, default=None)
     args = parser.parse_args()
     main(args.mountpoint, args.label, args.verbose, args.debug, args.meta, args.datastore, args.size, args.hash,
