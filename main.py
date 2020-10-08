@@ -267,7 +267,11 @@ def update_index(idx, add=True):
         try:
             if in_index and key_index[idx] - key_index[idx] <= 0:
                 free_blocks.append(hash_table[idx])
-                del key_index[idx]
+                try:
+                    del key_index[idx]
+                    del read_cache[idx]
+                except KeyError:
+                    pass
                 update_hash_table(_hash=idx, _operation=-1)
             elif in_index:
                 key_index[idx] = key_index[idx] - 1
@@ -452,15 +456,18 @@ def get_file_data(blklst, start_block=None, end_block=None, check_integrity=Fals
                 cur = hash_table[b]
                 if cur+allocation_unit > datastore.size():
                     to_read = datastore.size() - cur
-                    datastore.seek(cur)
-                    d = datastore.read(to_read-1)
+                    # datastore.seek(cur)
+                    # d = datastore.read(to_read-1)
+                    d = datastore[cur:to_read - 1]
                 else:
-                    datastore.seek(cur)
-                    d = datastore.read(allocation_unit)
+                    # datastore.seek(cur)
+                    # d = datastore.read(allocation_unit)
+                    d = datastore[cur:cur+allocation_unit]
                     for i in range(0, over_fetch_limit+1):
                         if datastore.tell() + allocation_unit > datastore.size():
                             break
-                        dat = datastore.read(allocation_unit)
+                        # dat = datastore.read(allocation_unit)
+                        dat = datastore[datastore.tell():datastore.tell() + allocation_unit]
                         read_cache[hash_data(dat)] = dat
                 read_cache[b] = d
 
@@ -1155,7 +1162,7 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
         last_gc = time.time()
         persist_data(fs.operations.get_entries())
         while True:
-            time.sleep(5)
+            time.sleep(100)
             if time.time() - last_gc > gc_interval and not lock.locked():
                 # garbage_collector()
                 persist_data(fs.operations.get_entries())
