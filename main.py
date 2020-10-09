@@ -46,7 +46,7 @@ from winfspy.plumbing.security_descriptor import SecurityDescriptor
 """
 Bunch of stuff to test the concept. Change this shit later to something useful fast and safe
 """
-datastore = None
+datastore = []
 key_index = {}
 hash_table = {}
 fs_meta = None
@@ -57,21 +57,30 @@ over_fetch_limit = 100
 cache_size = 30000  # Cache size in entries
 read_cache = LRU(maxlen=cache_size)
 
+partition_size = 48  # Partion size in GB
+ds_size = partition_size * 1073741824
+allocation_unit = 16384
+chunk_size_per_GB = 0.5
+chunk_size = int(math.ceil(chunk_size_per_GB * 1073741824))
+datastore_chunks_number = int(math.ceil(ds_size/chunk_size))  # DataStore chunks equal to one every GB of partition size
+
 key_index_path = os.path.join(os.getcwd(), 'metadata', "key_index.vfs")
-datastore_path = os.path.join(os.getcwd(), 'metadata', "datastore.bin")
 fs_meta_path = os.path.join(os.getcwd(), 'metadata', "fs.meta")
 hash_table_path = os.path.join(os.getcwd(), 'metadata', "hash_table.bin")
 free_blocks_path = os.path.join(os.getcwd(), 'metadata', "free_blocks.bin")
+
+
+datastore_base_path = os.path.join(os.getcwd(), 'metadata')
+datastore_chunks = list(range(0, datastore_chunks_number))
+
 
 write_buffer = 0
 # Buffer de escrita em multiplos da unidade de alocacao
 # sendo assim os arquivos serão persistidos a cada X blocos/unidades de alocacao, sendo X o write_buffer_size ou a cada
 # Y segundos, sendo Y o write_buffer_lifetime
-allocation_unit = 16384 * 4
 write_buffer_size = 100 * allocation_unit
 write_buffer_lifetime = 10
 gc_interval = 15  # Intervalo entre o final de uma operação de GC e o inicio de outra
-partition_size = 4  # Partion size in GB
 compressor_threads = 10
 compressed_file_system = None
 fixed_alloc = True
@@ -128,26 +137,26 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
         fs_meta = decompress_pickle(fs_meta_path)
 #########################
     if _datastore is None:
-        datastore_path = os.path.join(os.getcwd(), 'metadata', "datastore.bin")
+        datastore_path = os.path.join(os.getcwd(), 'metadata')
     else:
         datastore_path = _datastore
 
-    ds_size = partition_size * 1073741824
-    if os.path.isfile(datastore_path):
-        ds = open(datastore_path, "r+b")
-        datastore = mmap.mmap(ds.fileno(), length=ds_size, access=mmap.ACCESS_WRITE)
-        #datastore = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
-    else:
-        f = open(datastore_path, "wb")
-        f.write(identity_string)
-        f.flush()
-        f.close()
-        ds = open(datastore_path, "r+b")
-        datastore = mmap.mmap(ds.fileno(), length=ds_size, access=mmap.ACCESS_WRITE)
-        #datastore = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
-        ds.close()
+    for chunk in datastore_chunks:
+        if os.path.isfile(os.path.join(os.getcwd(), 'metadata', 'chunk'+str(chunk)+'.ds.vfs')):
+            ds = open(datastore_path, "r+b")
+            datastore[chunk] = mmap.mmap(ds.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
+            # datastore = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
+        else:
+            f = open(os.path.join(os.getcwd(), 'metadata', 'chunk'+str(chunk)+'.ds.vfs'), "wb")
+            f.write(identity_string)
+            f.flush()
+            f.close()
+            ds = open(os.path.join(os.getcwd(), 'metadata', 'chunk' + str(chunk) + '.ds.vfs'), "r+b")
+            datastore.append(mmap.mmap(ds.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE))
+            # datastore = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
+            ds.close()
 
-        free_blocks = list(range(0, ds_size, allocation_unit))
+            free_blocks.append(list(range(0, ds_size, allocation_unit)))
 
 
 def persist_data(fs_meta=None):
@@ -193,48 +202,59 @@ def get_usage():
     Return drive virtual (undeduped size) and physical (deduped_size) utilization
     :return: undeduped_size = Space that should be used if there was no deduplication. deduped_size = physical space being used after the deduplication
     """
-    undeduped_size = 0
 
-    tmp = key_index.copy()
-    for k in tmp:
-        undeduped_size = undeduped_size + (tmp[k]*allocation_unit)
+    fb = 0
+    for f in free_blocks:
+        fb = fb + len(f)
 
-    deduped_size = len(tmp)*allocation_unit
+    return ds_size - (fb*allocation_unit), 0
 
-    del tmp
-
-    print("Undeduped Space Used : " + humanbytes(undeduped_size))
-    print("Deduped Space Used : " + humanbytes(deduped_size))
-
-    return undeduped_size, deduped_size
+    # print('Implementation changed. Please recreate this')  # TODO: Recriar método de leitura de ocupação e otimização de espaço
+    # raise NotImplementedError
+    # undeduped_size = 0
+    #
+    # tmp = key_index.copy()
+    # for k in tmp:
+    #     undeduped_size = undeduped_size + (tmp[k]*allocation_unit)
+    #
+    # deduped_size = len(tmp)*allocation_unit
+    #
+    # del tmp
+    #
+    # print("Undeduped Space Used : " + humanbytes(undeduped_size))
+    # print("Deduped Space Used : " + humanbytes(deduped_size))
+    #
+    # return undeduped_size, deduped_size
 
 
 def garbage_collector():
-    global free_blocks
-    global datastore
-    global hash_table
-    global key_index
-    global lock
-
-    to_delete = []
-    lock.acquire()
-
-    key_index_copy = key_index.copy()
-    for k in key_index_copy:
-        if key_index_copy[k] == 0 and k not in free_blocks:
-            try:
-                free_blocks.append(hash_table[k])
-                to_delete.append(k)
-                # datastore[k] = None
-            except ValueError:
-                print("Garbage Collector: Index inconsistance")
-                pass
-
-    for i in to_delete:
-        del key_index[i]
-        del hash_table[i]
-
-    lock.release()
+    print('Implementation changed. Please recreate this')  # TODO: Reavaliar a necessidade de um garbage collector e reimplementar caso necessário
+    raise NotImplementedError
+    # global free_blocks
+    # global datastore
+    # global hash_table
+    # global key_index
+    # global lock
+    #
+    # to_delete = []
+    # lock.acquire()
+    #
+    # key_index_copy = key_index.copy()
+    # for k in key_index_copy:
+    #     if key_index_copy[k] == 0 and k not in free_blocks:
+    #         try:
+    #             free_blocks.append(hash_table[k])
+    #             to_delete.append(k)
+    #             # datastore[k] = None
+    #         except ValueError:
+    #             print("Garbage Collector: Index inconsistance")
+    #             pass
+    #
+    # for i in to_delete:
+    #     del key_index[i]
+    #     del hash_table[i]
+    #
+    # lock.release()
 
 
 # Checa se a posiçao do datastore já existia no dicionario de indice
@@ -242,18 +262,19 @@ def garbage_collector():
 # Caso não exista, cria nova entrada no dicionário e coloca a quantidade de referncias como 1
 # A quantidade de referencias indica quantas vezes aquele bloco esta sendo usado, quanto chegar a zero, ele deve ser
 # removido ou sobrescrito
-def update_index(idx, add=True):
+def update_index(idx, chunk=None, add=True):
     """
 
     :param idx: Hash of the block as of in the hash_table
     :param add: Operation. Should the block usage count go up or down?
     :return:
     """
+
     global key_index
     global lock
     in_index = False
 
-    lock.acquire()
+    # lock.acquire()
 
     if idx in key_index:
         in_index = True
@@ -266,7 +287,7 @@ def update_index(idx, add=True):
     else:
         try:
             if in_index and key_index[idx] - key_index[idx] <= 0:
-                free_blocks.append(hash_table[idx])
+                free_blocks[chunk].append(get_idx_from_hash_table(idx))
                 try:
                     del key_index[idx]
                     del read_cache[idx]
@@ -278,14 +299,35 @@ def update_index(idx, add=True):
         except Exception:
             print(traceback.format_exc())
             raise IOError
-    lock.release()
+    # lock.release()
     return True
 
 
-def update_hash_table(_hash, _block=None, _operation=1):
+def get_idx_and_chunk(idx):
+    global hash_table
+
+    h = str(hash_table[idx]).split(',')
+
+    return int(h[0]), int(h[1])
+
+
+def get_idx_from_hash_table(idx):
+    global hash_table
+
+    return int(str(hash_table[idx]).split(',')[0])
+
+
+def get_chunk_from_hash_table(idx):
+    global hash_table
+
+    return int(str(hash_table[idx]).split(',')[1])
+
+
+def update_hash_table(_hash, _block=None, _chunk_number=None, _operation=1):
     """
     Updates the hash_table in a thread safe way, preventig the dict changes while looping through it
 
+    :param _chunk_number: Number of the chunk where the block is contained
     :param _hash: The hash to be used as the dict key
     :param _block: block number to be used as dict value
     :param _operation: 1: Add , -1:Remove, 0: Update
@@ -293,11 +335,11 @@ def update_hash_table(_hash, _block=None, _operation=1):
     global hash_table
 
     if _operation == 1:
-        hash_table[_hash] = _block
+        hash_table[_hash] = str(_block)+','+str(_chunk_number)
     elif _operation == -1:
         del[_hash]
     elif _operation == 0:
-        hash_table[_hash] = _block
+        hash_table[_hash] = str(_block)+','+str(_chunk_number)
     else:
         print("Invalid Operation")
         return False
@@ -327,6 +369,9 @@ def write_new_block(_data, _fixed_alloc=True):
     global datastore
     global fixed_alloc
 
+    pos = None
+    block = None
+
     try:
         if compressed_file_system is not None:
             try:
@@ -335,14 +380,25 @@ def write_new_block(_data, _fixed_alloc=True):
                 print(traceback.format_exc())
         if fixed_alloc:
             try:
-                pos = free_blocks.pop(0)
-                datastore.seek(pos)
+                for idx, f in enumerate(free_blocks):
+                    try:
+                        pos = f[0]
+                        block = idx
+                        datastore.seek(pos)
+                        break
+                    except IndexError:
+                        if idx < len(free_blocks):
+                            continue
+                        else:
+                            raise NTStatusAccessDenied
+                # pos = free_blocks.pop(0)
             except IndexError:
                 raise NTStatusAccessDenied
         else:
-            datastore.resize(datastore.size()+len(_data))
-            datastore.seek(datastore.size()-len(_data))
-            pos = datastore.tell()
+            raise DeprecationWarning
+            # datastore.resize(datastore.size()+len(_data))
+            # datastore.seek(datastore.size()-len(_data))
+            # pos = datastore.tell()
 
         written = datastore.write(_data)
 
@@ -350,12 +406,13 @@ def write_new_block(_data, _fixed_alloc=True):
             r = True
         else:
             raise IOError
+
     except ValueError:
         raise IOError
     except TypeError:
         raise NTStatusAccessDenied
 
-    return r, pos
+    return r, pos, block
 
 
 def data_check(_data, _hash):
@@ -382,7 +439,7 @@ def dedup(data, blk_size, check_integrity=False):
     global compressed_file_system
 
     blk_list = []
-    lock.acquire()
+    # lock.acquire()
 
     if type(data) == bytearray or type(data) == bytes:
         if type(data) == bytes:
@@ -390,36 +447,45 @@ def dedup(data, blk_size, check_integrity=False):
 
         ch = chunks(data, blk_size)
         for c in ch:
+            r = False
             hashed_data = hash_data(c)
 
             if hashed_data in hash_table:
                 blk_list.append(hashed_data)
             else:
-                if len(free_blocks) > 0:
-                    try:
-                        datastore.seek(free_blocks[0])
-                        datastore.write(c)
-                        pos = free_blocks.pop(0)
-                        r = True
-                    except ValueError:
-                        free_blocks.pop(0)
-                        r, pos = write_new_block(c)
-                else:
-                    r, pos = write_new_block(c)
+                for idx, f in enumerate(free_blocks):
+                    if len(f) > 0:
+                        try:
+                            datastore[idx].seek(f[0])
+                            datastore[idx].write(c)
+                            pos = f.pop(0)
+                            chunk = idx
+                            r = True
+                            break
+                        except ValueError:
+                            if idx < len(free_blocks):
+                                continue
+                            else:
+                                break
+                            # free_blocks.pop(0)
+                            # r, pos, chunk = write_new_block(c)
+
+                if not r:
+                    r, pos, chunk = write_new_block(c)
 
                 if r:
                     blk_list.append(hashed_data)
-                    update_hash_table(_hash=hashed_data, _block=pos, _operation=1)
+                    update_hash_table(_hash=hashed_data, _block=pos, _chunk_number=chunk, _operation=1)
                 else:
                     raise IOError
 
-            lock.release()
+            # lock.release()
             update_index(hashed_data)
-            lock.acquire()
+            # lock.acquire()
 
     else:
         pass
-    lock.release()
+    # lock.release()
     return blk_list
 
 
@@ -456,18 +522,19 @@ def get_file_data(blklst, start_block=None, end_block=None, check_integrity=Fals
         else:
             d = seek_in_cache(b)
             if d is None:
-                cur = hash_table[b]
-                if cur+allocation_unit > datastore.size():
-                    to_read = datastore.size() - cur
-                    d = datastore[cur:to_read - 1]
+                cur, chunk = get_idx_and_chunk(b)
+                chunk = get_chunk_from_hash_table(b)
+                if cur+allocation_unit > datastore[chunk].size():
+                    to_read = datastore[chunk].size() - cur
+                    d = datastore[chunk][cur:to_read - 1]
                 else:
-                    d = datastore[cur:cur+allocation_unit]
+                    d = datastore[chunk][cur:cur+allocation_unit]
                     if not cached:
                         cached = True
                         for i in range(0, over_fetch_limit+1):
-                            if datastore.tell() + allocation_unit > datastore.size():
+                            if datastore[chunk].tell() + allocation_unit > datastore[chunk].size():
                                 break
-                            dat = datastore[datastore.tell():datastore.tell() + allocation_unit]
+                            dat = datastore[chunk][datastore[chunk].tell():datastore[chunk].tell() + allocation_unit]
                             read_cache[hash_data(dat)] = dat
                     read_cache[b] = d
 
@@ -482,23 +549,6 @@ def seek_in_cache(_blk_hash):
         return read_cache[_blk_hash]
     except KeyError:
         return None
-
-
-def single_read(_hash, force=False):
-    global datastore
-    global allocation_unit
-    global hash_table
-
-    cur = hash_table[_hash]
-    if cur + allocation_unit > datastore.size():
-        to_read = datastore.size() - cur
-        datastore.seek(cur)
-        d = datastore.read(to_read - 1)
-    else:
-        datastore.seek(cur)
-        d = datastore.read(allocation_unit)
-
-    return d
 
 
 def chunks(lst, n):
@@ -1152,7 +1202,9 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
         allocation_unit = _allocation_unit
         init_persistance(fs_meta, _key_index, _datastore, _hash_table, _free_blocks, _size)
     except Exception:
+        print(traceback.format_exc())
         print("Error initializing persistance. Please check file names and paths provided")
+        sys.exit(-1)
 
     fs = create_memory_file_system(mountpoint, label, verbose, debug, entries=fs_meta)
 
@@ -1169,7 +1221,7 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
             if time.time() - last_gc > gc_interval and not lock.locked():
                 # garbage_collector()
                 persist_data(fs.operations.get_entries())
-                u, d = get_usage()
+                # u, d = get_usage()
                 mem = memory()
                 print("-------------------")
                 #print("Undeduped Space Used : " + humanbytes(u))
