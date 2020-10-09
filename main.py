@@ -53,8 +53,8 @@ fs_meta = None
 free_blocks = []
 
 under_fetch_limit = 2
-over_fetch_limit = 10
-cache_size = 20000  # Cache size in entries
+over_fetch_limit = 100
+cache_size = 30000  # Cache size in entries
 read_cache = LRU(maxlen=cache_size)
 
 key_index_path = os.path.join(os.getcwd(), 'metadata', "key_index.vfs")
@@ -67,7 +67,7 @@ write_buffer = 0
 # Buffer de escrita em multiplos da unidade de alocacao
 # sendo assim os arquivos serão persistidos a cada X blocos/unidades de alocacao, sendo X o write_buffer_size ou a cada
 # Y segundos, sendo Y o write_buffer_lifetime
-allocation_unit = 16384
+allocation_unit = 16384 * 4
 write_buffer_size = 100 * allocation_unit
 write_buffer_lifetime = 10
 gc_interval = 15  # Intervalo entre o final de uma operação de GC e o inicio de outra
@@ -311,7 +311,9 @@ def hash_data(_data):
     :param _data: data to be hashed
     :return: hexdigest (hex without the leading charecters x0)
     """
-    return hashlib.sha3_256(_data).hexdigest()
+    # return hashlib.sha3_256(_data).hexdigest()
+    # return hashlib.sha3_512(_data).hexdigest()
+    return hashlib.sha1(_data).hexdigest()
 
 
 def write_new_block(_data, _fixed_alloc=True):
@@ -445,6 +447,7 @@ def get_file_data(blklst, start_block=None, end_block=None, check_integrity=Fals
 
     data = bytearray()
     at_start = 0
+    cached = False
     for idx, b in enumerate(blklst):
         if idx < start_block:
             at_start = at_start + 1
@@ -456,20 +459,17 @@ def get_file_data(blklst, start_block=None, end_block=None, check_integrity=Fals
                 cur = hash_table[b]
                 if cur+allocation_unit > datastore.size():
                     to_read = datastore.size() - cur
-                    # datastore.seek(cur)
-                    # d = datastore.read(to_read-1)
                     d = datastore[cur:to_read - 1]
                 else:
-                    # datastore.seek(cur)
-                    # d = datastore.read(allocation_unit)
                     d = datastore[cur:cur+allocation_unit]
-                    for i in range(0, over_fetch_limit+1):
-                        if datastore.tell() + allocation_unit > datastore.size():
-                            break
-                        # dat = datastore.read(allocation_unit)
-                        dat = datastore[datastore.tell():datastore.tell() + allocation_unit]
-                        read_cache[hash_data(dat)] = dat
-                read_cache[b] = d
+                    if not cached:
+                        cached = True
+                        for i in range(0, over_fetch_limit+1):
+                            if datastore.tell() + allocation_unit > datastore.size():
+                                break
+                            dat = datastore[datastore.tell():datastore.tell() + allocation_unit]
+                            read_cache[hash_data(dat)] = dat
+                    read_cache[b] = d
 
             if d is not None:
                 data += d
@@ -664,7 +664,10 @@ class FileObj(BaseFileObj):
         if at_start == 0:
             return data[offset:end_offset]
         else:
-            return (bytearray(1)*(allocation_unit*at_start)+data)[offset:end_offset]
+            if (allocation_unit*at_start) - offset == 0:
+                return data[:end_offset-offset]
+            else:
+                return (bytearray(1)*(allocation_unit*at_start)+data)[offset:end_offset]
 
     def write(self, buffer, offset, write_to_end_of_file):
         if write_to_end_of_file:
