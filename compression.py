@@ -1,3 +1,4 @@
+from numba import jit
 import pickle
 import bz2
 import lzma

@@ -1,4 +1,6 @@
 #import concurrent
+from numba import jit
+from fastcdc import fastcdc  #  list(fastcdc(d1, 4096, 8192, 16384))
 from concurrent import futures
 import gc
 import os.path
@@ -70,9 +72,9 @@ key_index = {}
 hash_table = {}
 fs_meta = None
 
-Blocks = []
-NEXT_BLOCK_OFFSET = []
-#free_blocks = []
+# Blocks = []
+# NEXT_BLOCK_OFFSET = []
+free_blocks = []
 
 under_fetch_limit = 2
 over_fetch_limit = 64  # 64 blocks of 16k = 1MB
@@ -81,7 +83,8 @@ read_cache = LRU(maxlen=cache_size)
 
 partition_size = 4  # Partion size in GB
 ds_size = partition_size * 1073741824
-allocation_unit = 16384 * 2
+allocation_unit = 8192
+read_allocation_unit = 1024*128
 chunk_size_per_GB = 1
 chunk_size = int(math.ceil(chunk_size_per_GB * 1073741824))
 datastore_chunks_number = int(math.ceil(ds_size/chunk_size))  # DataStore chunks equal to one every GB of partition size
@@ -189,8 +192,8 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
             #     out.write(b'0')
 
             # for n in list(range(0, chunk_size+allocation_unit, allocation_unit))[:-3]):
-            # free_blocks.append(list(range(0, chunk_size+allocation_unit, allocation_unit))[:-3])
-            NEXT_BLOCK_OFFSET.append([0])
+            free_blocks.append(list(range(0, chunk_size+allocation_unit, allocation_unit))[:-3])
+            # NEXT_BLOCK_OFFSET.append([0])
 
     gc.collect()
     return datastore, free_blocks, key_index, hash_table, fs_meta
@@ -291,6 +294,7 @@ def garbage_collector():
 # Caso não exista, cria nova entrada no dicionário e coloca a quantidade de referncias como 1
 # A quantidade de referencias indica quantas vezes aquele bloco esta sendo usado, quanto chegar a zero, ele deve ser
 # removido ou sobrescrito
+
 def update_index(idx, chunk=None, add=True):
     """
 
@@ -382,6 +386,7 @@ def update_hash_table(_hash, _block=None, _chunk_number=None, _operation=1):
     return True
 
 
+@jit(nopython=False)
 def hash_data(_data):
     """
     Takes the raw data and calculates it's hash, returning the hexdigest (hex without the leading charecters x0)
@@ -473,6 +478,7 @@ def get_free_block():
                 raise NTStatusAccessDenied
 
     return block, chunk
+
 
 def write_new_blocks(_queued_writes, datastore, free_blocks, _fixed_alloc=True):
     """
