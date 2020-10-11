@@ -7,6 +7,7 @@ from lz4 import frame
 import _pickle as cPickle
 from _bz2 import BZ2Decompressor
 import struct
+import traceback
 
 lzma_filters = [
     {"id": lzma.FILTER_DELTA, "dist": 5},
@@ -79,7 +80,7 @@ def compress_data(data, _format=4):
     elif _format == 4:
         cp_data = frame.compress(data)
         if len(cp_data) < len(data):
-            if len(cp_data) / len(data) > compression_trigger:
+            if len(cp_data) / len(data) < compression_trigger:
                 # print(str(len(cp_data) / len(data)))
                 return cp_data
             else:
@@ -108,9 +109,12 @@ def decompress_data(data, _format=4):
             d_context = frame.create_decompression_context()
             d1, b, e = frame.decompress_chunk(d_context, data)
             return d1
-        except:
+        except ValueError:
             # print("Compression Fallback")
             return data
+        except Exception:
+            print("Unknow compression error")
+            print(traceback.format_exc())
 
 """"
 LZ4 NOTE 

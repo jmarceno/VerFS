@@ -93,7 +93,7 @@ partition_size = 4  # Partion size in GB
 ds_size = partition_size * 1073741824
 allocation_unit = 8192
 read_allocation_unit = 1024*128
-chunk_size_per_GB = 1
+chunk_size_per_GB = 0.05
 chunk_size = int(math.ceil(chunk_size_per_GB * 1073741824))
 datastore_chunks_number = int(math.ceil(ds_size/chunk_size))  # DataStore chunks equal to one every GB of partition size
 
@@ -588,7 +588,14 @@ def datastore_read(_chunk, _block, _cached, _hash, read_size=0):
                     dat, own_size, nextBSize = split_data_from_size(dat)
                     read_cache[hash_data(dat)] = dat
 
-            decompresed_data = decompress_data(d)
+            if _hash == hash_data(d): # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
+                decompresed_data = d
+            else:
+                decompresed_data = decompress_data(d)
+
+            # if len(decompresed_data) == 0:  # Check if the compression has not returned invalid data
+            #     decompresed_data = d
+
             read_cache[_hash] = decompresed_data
 
         if _hash != hash_data(decompresed_data):
@@ -789,43 +796,47 @@ class FileObj(BaseFileObj):
 
         # START BLOCK --------
         start_block = 0
-        end_block = len(self.blklst)
+        end_block = len(self.blklst)-1
         subtract_from_beggning = 0
         subtract_from_end = 0
 
+        n = 0
         if offset > 0:
-            n = 0
+            # n = 0
             for idx, b in enumerate(self.blklst):
-                if n + hash_table[b].deflated_size < offset:
-                    n = n + hash_table[b].deflated_size
-                    #continue
+                n = n + hash_table[b].deflated_size
+                if n < offset:
+                    continue
                 else:
                     start_block = idx
-                    subtract_from_beggning = offset - n
+                    subtract_from_beggning = hash_table[b].deflated_size - (n - offset)
                     break
 
         if end_offset < self.file_size:
             n = 0
-            for idx, b in enumerate(self.blklst, start_block):
-                if n + hash_table[b].deflated_size < end_offset:
-                    n = n + hash_table[b].deflated_size
-                    #continue
+            for idx, b in enumerate(self.blklst):
+                n = n + hash_table[b].deflated_size
+                if n < end_offset:
+                    continue
                 else:
                     end_block = idx
-                    subtract_from_end = end_offset - n
+                    if n != end_offset:
+                        subtract_from_end = n - end_offset
                     break
 
         # def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset=0, check_integrity=False):
         a, data = get_file_data(self.blklst, start_block, end_block, offset, end_offset, False)
 
-        # if subtract_from_beggning > 0:
-        #     data = data[subtract_from_beggning:]
+        if subtract_from_beggning > 0:
+            data = data[subtract_from_beggning:]
             # for i in range(0, subtract_from_beggning):
             #     data.pop(0)
-        if subtract_from_end > 0:
+        if subtract_from_beggning == 0 and len(data) > length:
+            data = data[:length - len(data)]
+        elif subtract_from_end != 0:
                 data = data[:-subtract_from_end]
 
-        return data #[offset:end_offset]
+        return data  # [offset:end_offset]
 
     def write(self, buffer, offset, write_to_end_of_file):
         if write_to_end_of_file:
