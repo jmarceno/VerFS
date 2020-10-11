@@ -1,0 +1,31 @@
+def speed_test(hash):
+    start = time.time()
+    results = list(fastcdc(data, 4096, 8192, 16384, hf=hash))
+    taken = time.time() - start
+    print(str(taken))
+    return taken
+
+>>> sha26 = speed_test(hashlib.sha256)
+0.010995626449584961
+>>> blake2b = speed_test(_blake2.blake2b)
+0.011019706726074219
+>>> blake3 = speed_test(blake3.blake3)
+0.010998964309692383
+>>> xxhash32 = speed_test(xxhash.xxh32)
+0.010994911193847656
+>>> xxhash64 = speed_test(xxhash.xxh64)
+0.02099466323852539
+xxhaash3 = speed_test(xxhash.xxh3_64)
+0.010996580123901367
+xxhaash3 = speed_test(xxhash.xxh3_128)
+0.010996341705322266
+
+
+bigger dataset
+sha256 = 1.1414870524406433e-05
+blake2b = 1.010964903831482e-05
+blake3 = 1.282465717792511e-05
+xxhahs32 = 1.0134333181381225e-05
+xxhash64 = 1.0117278218269349e-05
+xxhash3_64 = 9.83137047290802e-06
+xxhash3_128 = 9.932645702362061e-06
