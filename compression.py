@@ -112,9 +112,10 @@ def decompress_data(data, _format=4):
         except ValueError:
             # print("Compression Fallback")
             return data
-        except Exception:
-            print("Unknow compression error")
-            print(traceback.format_exc())
+        except RuntimeError:
+            # print("Unknow compression error")
+            # print(traceback.format_exc())
+            return data
 
 """"
 LZ4 NOTE 

@@ -1,8 +1,8 @@
 from fastcdc import fastcdc  #  list(fastcdc(d1, 4096, 8192, 16384))
 import xxhash
 
-min_blk_size = 1024*8
-mean_blk_size = 1024*16
+min_blk_size = 1024*16
+mean_blk_size = 1024*24
 max_blk_size = 1024*32
 
 
