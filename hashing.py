@@ -6,12 +6,12 @@ mean_blk_size = 1024*24
 max_blk_size = 1024*32
 
 
-def hashed_chunks(data, fat=True, hf=xxhash.xxh3_64):
+def hashed_chunks(data, fat=True, hf=xxhash.xxh3_128):
     return list(fastcdc(data, min_blk_size, mean_blk_size, max_blk_size, fat=fat, hf=hf))
 
 
 def hash_data(data):
-    return xxhash.xxh3_64(data).hexdigest()
+    return xxhash.xxh3_128(data).hexdigest()
 
 # def hash_data(_data):
 #     """

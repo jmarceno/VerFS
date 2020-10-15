@@ -63,48 +63,41 @@ def decompress_pickle(file, format=4):
             return cPickle.load(data)
 
 
-def compress_data(data, _format=4):
+def compress_data(data, _format=1):
     """
 
     :param data:
     :param _format:
-    :return: 1: Bzip2, 2:Zip, 3:Lzma, 4: lz4
+    :return: 1: lz4, 2:Zip, 3:Lzma, 4: bz2
     """
     _format = int(_format)
     if _format == 1:
-        return bz2.compress(data, bz2_compression_level)
+        cp_data = frame.compress(data)
+        if len(cp_data) < len(data):
+            if len(cp_data) / len(data) < compression_trigger:
+                # print(str(len(cp_data) / len(data)))
+                return True, cp_data
+            else:
+                return False, data
+        else:
+            return False, data
     elif _format == 2:
         return zlib.compress(data, zlib_compression_level)
     elif _format == 3:
         return lzma.compress(data, filters=lzma_filters)
     elif _format == 4:
-        cp_data = frame.compress(data)
-        if len(cp_data) < len(data):
-            if len(cp_data) / len(data) < compression_trigger:
-                # print(str(len(cp_data) / len(data)))
-                return cp_data
-            else:
-                return data
-        else:
-            return data
+        return bz2.compress(data, bz2_compression_level)
 
 
-def decompress_data(data, _format=4):
+def decompress_data(data, _format=1):
     """
 
     :param data:
     :param _format:
-    :return: 1: Bzip2, 2:Zip, 3:Lzma, 4:lz4
+    :return: 1: lz4, 2:Zip, 3:Lzma, 4:BZip2
     """
     _format = int(_format)
     if _format == 1:
-        return bz2_decompress(data)
-    elif _format == 2:
-        raise zlib.decompress(data)
-    elif _format == 3:
-        return lzma_decompress(data)
-    elif _format == 4:
-        # frame.decompress(data)  #  Simple decompressor
         try:
             d_context = frame.create_decompression_context()
             d1, b, e = frame.decompress_chunk(d_context, data)
@@ -116,6 +109,12 @@ def decompress_data(data, _format=4):
             # print("Unknow compression error")
             # print(traceback.format_exc())
             return data
+    elif _format == 2:
+        raise zlib.decompress(data)
+    elif _format == 3:
+        return lzma_decompress(data)
+    elif _format == 4:
+        return bz2_decompress(data)
 
 """"
 LZ4 NOTE 

@@ -46,6 +46,20 @@ from winfspy.plumbing.win32_filetime import filetime_now
 from winfspy.plumbing.security_descriptor import SecurityDescriptor
 
 
+class MyBTree(IOBTree.BTree):
+    max_leaf_size = 500
+    max_internal_size = 1000
+
+
+class DataStore:
+    def __init__(self, _chunk, _chunk_size, _path):
+        self.chunk = _chunk
+        self.size = _chunk_size
+        self.path = _path
+        self.next_write_position = 0
+        self.IS_FULL = False
+
+
 class QueuedWrite:
     def __init__(self, _idx, _hash, _data):
         self.idx = _idx
@@ -56,10 +70,14 @@ class QueuedWrite:
         self.block = 0
         self.result = False
         self.creation_time = time.time()
+        self.compressed = False
+
+        if len(self.compressed_data) != len(self.data):
+            self.compressed = True
 
     def __compress__(self):
-        d = compress_data(self.data)
-        d = len(d).to_bytes(2, byteorder='little') + d
+        compressed, d = compress_data(self.data)
+        # d = len(d).to_bytes(2, byteorder='little') + d
 
         return d
 
@@ -71,8 +89,18 @@ class Block:
         self.hash = ""
         self.size = 0  # Tamanho depois da compressao
         self.deflated_size = 0  # Tamanho sem compressao
+        self.uses = 1
+        self.compressed = False
         self.DELETED = False
         self.DELETION_TIME = time.time()
+
+
+class FileBlock:
+    def __init__(self, _hash, _size):
+        self.hash = _hash
+        self.size = _size
+
+
 
 """
 Bunch of stuff to test the concept. Change this shit later to something useful fast and safe
@@ -91,7 +119,7 @@ free_blocks = []
 # sendo assim os arquivos serão persistidos a cada X blocos/unidades de alocacao, sendo X o write_buffer_size ou a cada
 # Y segundos, sendo Y o write_buffer_lifetime
 write_read_cache = {}
-write_buffer = queue.Queue()
+write_buffer = deque()  # queue.Queue()
 write_buffer_size = 3000
 write_buffer_lifetime = 15
 write_buffer_lock = False
@@ -99,15 +127,17 @@ gc_interval = 60  # Intervalo entre o final de uma operação de GC e o inicio d
 
 under_fetch_limit = 2
 over_fetch_limit = 6  # 64 blocks of 16k = 1MB
+over_read_limit = 2097152  # Number of bytes that will be read at each interaction of the read loop. This is effectivily a cache
 cache_size = 50000  # Cache size in entries. Memory size is ~cache_size*allocation_unit
 read_cache = LRU(maxlen=cache_size)
 header_size = 2
+block_address_size = 5
 
 partition_size = 4  # Partion size in GB
 ds_size = partition_size * 1073741824
 allocation_unit = 16384
 read_allocation_unit = 1024*128
-chunk_size_per_GB = 0.1
+chunk_size_per_GB = 1
 chunk_size = int(math.ceil(chunk_size_per_GB * 1073741824))
 datastore_chunks_number = int(math.ceil(ds_size/chunk_size))  # DataStore chunks equal to one every GB of partition size
 
@@ -180,18 +210,21 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
         chunk_path = os.path.join(os.getcwd(), 'metadata', 'chunk' + str(chunk) + '.ds.vfs')
 
         if os.path.isfile(chunk_path):
-            ds = open(datastore_path, "r+b")
-            datastore[chunk] = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
+            raise NotImplementedError
+            pass
+            # ds = open(datastore_path, "r+b")
+            # datastore[chunk] = mmap.mmap(ds.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
             # datastore = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
         else:
             f = open(os.path.join(os.getcwd(), 'metadata', 'chunk'+str(chunk)+'.ds.vfs'), "wb")
-            f.write(b'\\\\')
+            f.write(b'\x00\x00\x00\x00\x00')
             f.flush()
             f.close()
             ds = open(chunk_path, "r+b")
             # datastore.append(mmap.mmap(ds.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE))
-            tmp_map = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
-            datastore.append(chunk_path)
+            tmp_map = mmap.mmap(ds.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
+            datastore.append(DataStore(chunk, chunk_size, chunk_path))
+            # datastore.append(chunk_path)
             # datastore = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
             tmp_map.close()
             ds.close()
@@ -225,48 +258,55 @@ def persist_data(fs_meta=None):
 
     # temp_wr_buffer = write_buffer
 
-    keys = key_index.copy()
-    compressed_pickle(key_index_path, keys)
+    # keys = key_index.copy()
+    compressed_pickle(key_index_path, key_index)
     # pickle.dump(keys, open(key_index_path, "wb"))
 
     h = hash_table.copy()
     compressed_pickle(hash_table_path, h)
     # pickle.dump(h, open(hash_table_path, "wb"))
 
-    f = free_blocks.copy()
-    compressed_pickle(free_blocks_path, f)
+    # f = free_blocks.copy()
+    compressed_pickle(free_blocks_path, free_blocks)
 
     # datastore.flush()  # TODO: Mudar para que sejam persistidas apenas as mudanças feitas
 
-    _fs_meta = copy.deepcopy(fs_meta)
-    compressed_pickle(fs_meta_path, _fs_meta)
+    # _fs_meta = copy.deepcopy(fs_meta)
+    compressed_pickle(fs_meta_path, fs_meta)
     # pickle.dump(_fs_meta, open(fs_meta_path, "wb"))
 
     return True
 
 
-def get_usage(_allocation_unit, _len_hash_table):
+def get_usage():
     """
+    TODO: RECONSIDERAR TROCAR O KEY-INDEX POR UTLIZAÇÃO DE INDICE COM QUANTIDADE NOS BLOCOS
     Return drive virtual (undeduped size) and physical (deduped_size) utilization
-    :return: undeduped_size = Space that should be used if there was no deduplication. deduped_size = physical space being used after the deduplication
+    :return: Undeduped Data Un-Compressed, Undeduped Data Compressed, Deduped Data Compressed, Deduped Data Removed, Compression rate
     """
+    global hash_table
+    global key_index
 
-    # fb = 0
-    # for f in free_blocks:
-    #     fb = fb + len(f)
+    undeduped_compressed = 0
+    undeduped_uncompressed = 0
+    deduped_compressed = 0
+    compression_rate = 0.0
 
-    undeduped_size = 0
-    #deduped_size = 0
     for k in key_index:
-        undeduped_size = undeduped_size + (key_index[k] * _allocation_unit)
-        #deduped_size = deduped_size + 1
+        if not hash_table[k].DELETED:
+            undeduped_uncompressed = undeduped_uncompressed + (key_index[k] * hash_table[k].deflated_size)
+            undeduped_compressed = undeduped_compressed + (key_index[k] * hash_table[k].size)
+            deduped_compressed = deduped_compressed + hash_table[k].size
 
-    deduped_size = _len_hash_table * _allocation_unit
+    if undeduped_compressed != 0 and undeduped_uncompressed != 0:
+        compression_rate = undeduped_compressed/undeduped_uncompressed
 
-    print("Undeduped Space Used : " + humanbytes(undeduped_size))
-    print("Deduped Space Used : " + humanbytes(deduped_size))
+    print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
+    print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
+    print("Deduped (Compression) Space Used : " + humanbytes(deduped_compressed) + " [Duplicated data found (Saved Space): " + humanbytes(undeduped_compressed-deduped_compressed) + " ]")
+    print("Compression Rate : " + str(compression_rate) + "%")
 
-    return 0, 0#deduped_size, undeduped_size
+    return undeduped_uncompressed, undeduped_compressed, deduped_compressed, (undeduped_compressed-deduped_compressed), compression_rate
 
 
 def garbage_collector():
@@ -324,12 +364,13 @@ def update_index(idx, chunk=None, add=True):
     if add:
         if in_index:
             key_index[idx] = int(key_index[idx] + 1)
+            hash_table[idx].uses = hash_table[idx].uses + 1
         else:
             key_index[idx] = 1
     else:
         try:
             if in_index and key_index[idx] - key_index[idx] <= 0:
-                free_blocks[chunk].append(hash_table[idx].chunk)
+                free_blocks[chunk].append(hash_table[idx])
                 hash_table[idx].DELETED = True
                 hash_table[idx].DELETION_TIME = time.time()
                 try:
@@ -337,9 +378,10 @@ def update_index(idx, chunk=None, add=True):
                     del read_cache[idx]
                 except KeyError:
                     pass
-                update_hash_table(_hash=idx, _operation=-1)
+                # update_hash_table(_hash=idx, _operation=-1)
             elif in_index:
                 key_index[idx] = key_index[idx] - 1
+                hash_table[idx].uses = hash_table[idx].uses - -1
         except Exception:
             print(traceback.format_exc())
             raise IOError
@@ -351,69 +393,37 @@ def get_size_and_data(data):
     return data[0:4], data[4:]
 
 
-def update_hash_table(_hash, _block=None, _chunk_number=None, _operation=1):
-    """
-    Updates the hash_table in a thread safe way, preventig the dict changes while looping through it
-
-    :param _chunk_number: Number of the chunk where the block is contained
-    :param _hash: The hash to be used as the dict key
-    :param _block: block number to be used as dict value
-    :param _operation: 1: Add , -1:Remove, 0: Update
-    """
-    global hash_table
-
-    if _operation == 1:
-        if _chunk_number is not None:
-            hash_table[_hash] = str(_block)+','+str(_chunk_number)
-        else:
-            print("This operation needs the chunk number.")
-            raise IOError
-    elif _operation == -1:
-        hash_table[_hash].DELETED = True
-        hash_table[_hash].DELETION_TIME = time.time()
-    elif _operation == 0:
-        if _chunk_number is not None:
-            hash_table[_hash] = str(_block)+','+str(_chunk_number)
-        else:
-            print("This operation needs the chunk number.")
-            raise IOError
-    else:
-        print("Invalid Operation")
-        return False
-
-    return True
-
-
-def commit_data():
-    global datastore
-    global hash_table
-    global free_blocks
-    global write_buffer_lock
-
-    write_buffer_lock = True
-    # if len(write_buffer) > 0:
-    #     write_new_blocks(write_buffer)
-
-    # for q in write_buffer:
-    #     hash_table[q.hash] = Block()
-    #     hash_table[q.hash].chunk = q.chunk
-    #     hash_table[q.hash].offset = q.block
-    #     hash_table[q.hash].size = len(q.compressed_data)
-    #     hash_table[q.hash].deflated_size = len(q.data)
-    #     try:
-    #         del write_read_cache[q.hash]
-    #     except KeyError:
-    #         pass
-    #
-    # wb_size = len(write_buffer) - 1
-    # for i in range(0, wb_size):
-    #     try:
-    #         if write_buffer[i].result:
-    #             del write_buffer[i]
-    #     except IndexError:
-    #         pass
-
-    write_buffer_lock = False
+# def update_hash_table(_hash, _block=None, _chunk_number=None, _operation=1):
+#     """
+#     Updates the hash_table in a thread safe way, preventig the dict changes while looping through it
+#
+#     :param _chunk_number: Number of the chunk where the block is contained
+#     :param _hash: The hash to be used as the dict key
+#     :param _block: block number to be used as dict value
+#     :param _operation: 1: Add , -1:Remove, 0: Update
+#     """
+#     global hash_table
+#
+#     if _operation == 1:
+#         if _chunk_number is not None:
+#             hash_table[_hash] = str(_block)+','+str(_chunk_number)
+#         else:
+#             print("This operation needs the chunk number.")
+#             raise IOError
+#     elif _operation == -1:
+#         hash_table[_hash].DELETED = True
+#         hash_table[_hash].DELETION_TIME = time.time()
+#     elif _operation == 0:
+#         if _chunk_number is not None:
+#             hash_table[_hash] = str(_block)+','+str(_chunk_number)
+#         else:
+#             print("This operation needs the chunk number.")
+#             raise IOError
+#     else:
+#         print("Invalid Operation")
+#         return False
+#
+#     return True
 
 
 def write_new_blocks(_queued_writes):
@@ -426,86 +436,113 @@ def write_new_blocks(_queued_writes):
     global chunk_size
     global datastore
     global free_blocks
-    # global read_cache
+    global write_buffer_lock
+    global hash_table
+    global fs_meta
 
-    while not write_buffer.empty():
-        q = write_buffer.get_nowait()
-    # for q in _queued_writes:
-        if not q.result:
-            try:
-                for idx, path in enumerate(datastore):
-                    if os.stat(path).st_size + len(q.compressed_data)+1024 <= chunk_size:
-                        q.chunk = idx
-                        break
-                    if idx == len(datastore) - 1:
-                        for fb in free_blocks:
-                            try:
-                                q.block = fb.minKey(len(q.compressed_data)).pop(0)
-                                break
-                            except ValueError:
-                                if idx == len(free_blocks) - 1:
-                                    print("Partition FULL. No free blocks that can fit the data.")
-                                    raise NTStatusAccessDenied
-                                else:
-                                    continue
-            except ValueError:
-                print("Value Error allocating space for the queued writes.")
-                print(traceback.format_exc())
-                raise IOError
-            except TypeError:
-                print(traceback.format_exc())
-                print("Type Error allocating space for the queued writes.")
-            except Exception:
-                print(traceback.format_exc())
-                raise NTStatusAccessDenied
+    registers_processed = 0
+    bytes_processed = 0
+    writing = True
+    start_time = time.time()
 
-    # for q in _queued_writes:
-        if not q.result:
-            if os.path.isfile(datastore[q.chunk]):
-                with open(datastore[q.chunk], "r+b") as f:
-                    mm = mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_WRITE)
-                    if q.block == 0:  # Bloco vai ser alocado ao final do chunk ou no primeiro bloco caso o chunk esteja vazio
-                        if mm.size() == 3:
-                            q.block = 0
+    write_buffer_lock = True
+    while writing:
+
+        try:
+            q = write_buffer.popleft()
+            if not q.result:
+                try:
+                    for idx, ds in enumerate(datastore):
+                        if not ds.IS_FULL:
+                            q.block = ds.next_write_position
+                            if q.compressed:
+                                ds.next_write_position = ds.next_write_position + len(q.compressed_data)
+                            else:
+                                ds.next_write_position = ds.next_write_position + len(q.data)
+                            q.chunk = ds.chunk
+                            if ds.next_write_position + 32768 > ds.size:
+                                ds.IS_FULL = True
+
+                            break
+                        elif idx != len(datastore)-1:
+                            continue
                         else:
-                            q.block = mm.size()
-                        # if mm.size() < len(q.compressed_data)+1024 + q.block:
-                        mm.resize(mm.size()+len(q.compressed_data))
-                    mm.seek(q.block)
+                            for fb in free_blocks:
+                                try:
+                                    q.block = fb[0].minKey(len(q.compressed_data)).pop(0)
+                                    break
+                                except ValueError:
+                                    if idx == len(free_blocks) - 1:
+                                        print("Partition FULL. No free blocks that can fit the data.")
+                                        raise NTStatusAccessDenied
+                                    else:
+                                        continue
                     written = 0
+                    written_hash = ""
                     try:
-                        written = mm.write(q.compressed_data)
+                        if os.path.isfile(datastore[q.chunk].path):     # TODO: Organize all the data in one single right
+                            with open(datastore[q.chunk].path, "r+b") as f:
+                                mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
+                                mm.seek(q.block)
+                                if q.compressed:
+                                    written = mm.write(q.compressed_data)
+                                    written_hash = hash_data(q.compressed_data)
+                                else:
+                                    written = mm.write(q.data)
+                                    written_hash = hash_data(q.data)
                     except ValueError:
                         print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
                         print(traceback.format_exc())
 
-                    if len(q.compressed_data) == written:
+                    if not q.compressed and written_hash != q.hash:
+                        print("Data corruption - Hash inconsistance")
+
+                    if q.compressed and written_hash != hash_data(q.compressed_data):
+                        print("Data corruption - Hash inconsistance")
+
+                    if len(q.compressed_data) == written or len(q.data) == written:
                         q.result = True
                         # update_hash_table(q.hash, q.block, q.chunk, 1)
                         update_index(q.hash, q.chunk, True)
+
+                        hash_table[q.hash] = Block()
+                        hash_table[q.hash].hash = q.hash
+                        hash_table[q.hash].chunk = q.chunk
+                        hash_table[q.hash].offset = q.block
+                        hash_table[q.hash].size = len(q.compressed_data)
+                        hash_table[q.hash].deflated_size = len(q.data)
+                        hash_table[q.hash].compressed = q.compressed
+
+                        registers_processed = registers_processed + 1
+                        bytes_processed = bytes_processed + written
+                        try:
+                            del write_read_cache[q.hash]
+                        except KeyError:
+                            print('DESGRAÇA')
+                        continue
                     else:
-                        print("IOError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
+                        print(
+                            "IOError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
                         print(traceback.format_exc())
                         raise IOError
-            else:
-                print("Unspecified error flushing the write queue")
-                print(traceback.format_exc())
-                raise IOError
 
-        hash_table[q.hash] = Block()
-        hash_table[q.hash].chunk = q.chunk
-        hash_table[q.hash].offset = q.block
-        hash_table[q.hash].size = len(q.compressed_data)
-        hash_table[q.hash].deflated_size = len(q.data)
-        try:
-            del write_read_cache[q.hash]
-        except KeyError:
-            pass
+                except Exception:
+                    print(traceback.format_exc())
 
+        except IndexError:
+            if registers_processed > 0:
+                print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
+                print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+                persist_data(fs_meta)
+            writing = False
+            write_buffer_lock = False
+            gc.collect()
+            break
+    write_buffer_lock = False
     # return _queued_writes
 
 
-def dedup(data, blk_size, check_integrity=False):
+def dedup(data):
     global datastore
     global free_blocks
     global write_lock
@@ -524,36 +561,36 @@ def dedup(data, blk_size, check_integrity=False):
 
         ch = variable_chunks(data)
         for c in ch:
-            hashed_data = c.hash
             read_cache[c.hash] = c.data
             blk_list.append(0)
 
-            if hashed_data in hash_table:
-                blk_list[len(blk_list)-1] = hashed_data
+            if c.hash in hash_table:
+                blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
+                print("duped")
+                update_index(c.hash)
             else:
                 done = False
-                for q in queued_writes:
-                    if q.hash == hashed_data:
-                        blk_list[len(blk_list)-1] = hashed_data
+                for q in queued_writes:   #  Verify if this block has already been processed in this batch
+                    if q.hash == c.hash:
+                        blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
+                        hash_table[c.hash].uses = hash_table[c.hash].uses + 1
                         done = True
+                        print("duped")
                         break
+                wb = write_buffer.copy()
+                for w in wb:   #  Verify fi this block is already in the write queue to be writtn
+                    if w.hash == c.hash:
+                        blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
+                        hash_table[c.hash].uses = hash_table[c.hash].uses + 1
+                        done = True
+                        print("duped")
+                        break
+                del wb
                 if not done:
-                    queued_writes.append(QueuedWrite(len(blk_list)-1, c.hash, c.data))
-
-        # if len(queued_writes) > 0:
-        #     write_new_blocks(queued_writes)
-
-        for q in queued_writes:
-            blk_list[q.idx] = q.hash
-            write_read_cache[q.hash] = q.data
-            write_buffer.put(q)
-            # hash_table[q.hash] = Block()
-            # hash_table[q.hash].chunk = q.chunk
-            # hash_table[q.hash].offset = q.block
-            # hash_table[q.hash].size = len(q.compressed_data)
-            # hash_table[q.hash].deflated_size = len(q.data)
-
-        # write_buffer = write_buffer + queued_writes
+                    q = QueuedWrite(len(blk_list)-1, c.hash, c.data)
+                    blk_list[q.idx] = FileBlock(q.hash, len(c.data))
+                    write_read_cache[c.hash] = c.data
+                    write_buffer.append(q)
 
     else:
         print("Value Error when preparing writes")
@@ -567,63 +604,99 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
     global datastore
     global allocation_unit
     global hash_table
-    global compressed_file_system
     global read_cache
 
     data = bytearray()
-    at_start = 0
+
     cached = False
+    r = bytearray()
 
     for idx, b in enumerate(blklst):
         if idx < start_block:
-            at_start = at_start + 1
+            continue
+            # at_start = at_start + 1
         elif idx > end_block:
-            return at_start, data
+            return data
 
         if idx >= start_block:
-            d = seek_in_cache(b)
+            d = seek_in_cache(b.hash)
+            if d is not None:
+                if len(d) != b.size:
+                    print("DEBUG: Invalid data on cache entry")
+                    d = None
+                    del read_cache[b.hash]
+            if d is None and len(r) > b.size:
+                if hash_data(r[:hash_table[b.hash].size]) == b.hash:
+                    d = r[:b.size]
+                    r = r[b.size:]
+                    read_cache[b.hash] = d
 
             if d is None:
-                # d, cached = datastore_read(hash_table[b].chunk, hash_table[b].offset, cached, b, hash_table[b].size)
-                _chunk = hash_table[b].chunk
-                _block = hash_table[b].offset
-                _hash = hash_table[b].hash
-                read_size = hash_table[b].size
+                try:
+                    _chunk = hash_table[b.hash].chunk
+                    _block = hash_table[b.hash].offset
+                    _hash = hash_table[b.hash].hash
+                    read_size = hash_table[b.hash].size
+                except KeyError:
+                    time.sleep(0.01)
+                    d = seek_in_cache(b.hash)
+                    if d is not None:
+                        break
 
-                if os.path.isfile(datastore[_chunk]):
-                    with open(datastore[_chunk], "r+b", buffering=allocation_unit) as f:
-                        mm = mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_WRITE)
+                    _chunk = hash_table[b.hash].chunk
+                    _block = hash_table[b.hash].offset
+                    _hash = hash_table[b.hash].hash
+                    read_size = hash_table[b.hash].size
 
-                        if _block + read_size + header_size < mm.size():
-                            d = mm[_block:_block + read_size + header_size]
-                            d, own_size, nextBSize = split_data_from_size(d)
+                if os.path.isfile(datastore[_chunk].path):
+                    with open(datastore[_chunk].path, "r+b", buffering=allocation_unit) as f:
+                        mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
+                        mm.seek(_block)
+                        r = mm.read(read_size + over_read_limit)
+                        d = r[:read_size]
+                        r = r[read_size:]
+
+                        # d = mm[_block:read_size]
+                        # d, own_size, nextBSize = split_data_from_size(d, next_block=False)
+
+                        # if _block + over_read_limit < mm.size():    # TODO: Change to read until the end of the chunk if possible
+                        #     over_read_data = mm[_block:over_read_limit]
+                        #     d, own, nextBSize = split_data_from_size(over_read_data[:read_size + header_size])
+                        #
+                        #     over_read_data = over_read_data[read_size+header_size:]
+                        #     next_read = over_read_data[:nextBSize + header_size]
+                        #     if nextBSize != 0:
+                        #         while len(over_read_data) > nextBSize + header_size:
+                        #             try:
+                        #                 to_cache, own, nextBSize = split_data_from_size(next_read)
+                        #                 to_cache = decompress_data(to_cache)
+                        #                 read_cache[hash_data(to_cache)] = to_cache
+                        #                 over_read_data = over_read_data[nextBSize + header_size]
+                        #             except:
+                        #                 break
+                        # else:
+                        #     d = mm[_block:mm.size()]
+                        #     d, own_size, nextBSize = split_data_from_size(d, next_block=False)
+
+                        # if not cached:
+                        #     cached = True
+                        #     for i in range(0, over_fetch_limit + 1):
+                        #         if mm.tell() + nextBSize > mm.size():
+                        #             break
+                        #         dat = mm[mm.tell():mm.tell() + nextBSize + header_size]
+                        #         dat, own_size, nextBSize = split_data_from_size(dat)
+                        #         read_cache[hash_data(dat)] = dat
+
+                        if hash_table[b.hash].compressed:
+                            decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
                         else:
-                            d = mm[_block:_block + read_size]
-                            d, own_size, nextBSize = split_data_from_size(d, next_block=False)
-
-                        if not cached:
-                            cached = True
-                            for i in range(0, over_fetch_limit + 1):
-                                if mm.tell() + nextBSize > mm.size():
-                                    break
-                                dat = mm[mm.tell():mm.tell() + nextBSize + header_size]
-                                dat, own_size, nextBSize = split_data_from_size(dat)
-                                read_cache[hash_data(dat)] = dat
-
-                        if _hash == hash_data(d):  # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
                             decompresed_data = d
-                        else:
-                            decompresed_data = decompress_data(d)
-
-                        # if len(decompresed_data) == 0:  # Check if the compression has not returned invalid data
-                        #     decompresed_data = d
 
                         read_cache[_hash] = decompresed_data
 
-                    if _hash != hash_data(decompresed_data):
-                        # print('PUTA QUE O PARIUUUUUUUUUUUUUUUUU')
-                        decompresed_data = d
-
+                    # if _hash != hash_data(decompresed_data):
+                    #     print('Critical data failure')
+                        # decompresed_data = d
                     d = decompresed_data
 
                 else:
@@ -631,55 +704,12 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
                     print(traceback.format_exc())
                     raise IOError
 
+            if b.hash != hash_data(d):
+                print('Critical data failure')
             if d is not None:
                 data += d
 
-    return at_start, data
-
-#
-# def datastore_read(_chunk, _block, _cached, _hash, read_size=0):
-#     global datastore
-#     global read_cache
-#     global header_size
-#
-#     if os.path.isfile(datastore[_chunk]):
-#         with open(datastore[_chunk], "r+b", buffering=allocation_unit) as f:
-#             mm = mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_WRITE)
-#
-#             if _block+read_size+header_size < mm.size():
-#                 d = mm[_block:_block + read_size + header_size]
-#                 d, own_size, nextBSize = split_data_from_size(d)
-#             else:
-#                 d = mm[_block:_block + read_size]
-#                 d, own_size, nextBSize = split_data_from_size(d, next_block=False)
-#
-#             if not _cached:
-#                 _cached = True
-#                 for i in range(0, over_fetch_limit + 1):
-#                     if mm.tell() + nextBSize > mm.size():
-#                         break
-#                     dat = mm[mm.tell():mm.tell() + nextBSize + header_size]
-#                     dat, own_size, nextBSize = split_data_from_size(dat)
-#                     read_cache[hash_data(dat)] = dat
-#
-#             if _hash == hash_data(d): # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
-#                 decompresed_data = d
-#             else:
-#                 decompresed_data = decompress_data(d)
-#
-#             # if len(decompresed_data) == 0:  # Check if the compression has not returned invalid data
-#             #     decompresed_data = d
-#
-#             read_cache[_hash] = decompresed_data
-#
-#         if _hash != hash_data(decompresed_data):
-#             print('PUTA QUE O PARIUUUUUUUUUUUUUUUUU')
-#
-#         return decompresed_data, _cached
-#     else:
-#         print("IOError when trying to read physical media")
-#         print(traceback.format_exc())
-#         raise IOError
+    return data
 
 
 def split_data_from_size(data, next_block=True):
@@ -700,6 +730,14 @@ def get_next_block_size(data):
     global header_size
 
     size = int.from_bytes(data[-header_size:], byteorder='little')
+
+    return size
+
+
+def get_next_block(data):
+    global block_address_size
+
+    size = int.from_bytes(data, byteorder='little')
 
     return size
 
@@ -871,70 +909,77 @@ class FileObj(BaseFileObj):
             raise NTStatusEndOfFile()
         end_offset = min(self.file_size, offset + length)
 
-        # START BLOCK --------
-        start_block = 0
-        end_block = len(self.blklst)-1
-        subtract_from_beggning = 0
-        subtract_from_end = 0
+        start_blk = 0
+        start_diff = 0
+        end_blk = 0
+        end_diff = 0
 
-        s_n = 0
-        if offset > 0:
-            # n = 0
-            for idx, b in enumerate(self.blklst):
-                try:
-                    s_n = s_n + hash_table[b].deflated_size
-                except KeyError:
-                    s_n = s_n + len(write_read_cache[b])
+        internal_offset = 0
+        for blk_number, blk in enumerate(self.blklst):
+            internal_offset = internal_offset + blk.size
+            if internal_offset < offset:
+                continue
+            elif internal_offset == offset:
+                start_blk = blk_number + 1
+                break
+            else:
+                start_blk = blk_number
+                start_diff = internal_offset - offset
+                if start_diff > 32769:
+                    print("tomar no cu")
+                break
 
-                if s_n < offset:
-                    continue
-                else:
-                    start_block = idx
-                    try:
-                        subtract_from_beggning = hash_table[b].deflated_size - (s_n - offset)
-                    except KeyError:
-                        subtract_from_beggning = len(write_read_cache[b]) - (s_n - offset)
-                    break
+        internal_offset_e = 0
+        for blk_number_e, blk_e in enumerate(self.blklst):
+            internal_offset_e = internal_offset_e + blk_e.size
+            if internal_offset_e < end_offset:
+                continue
+            elif internal_offset_e == end_offset:
+                end_blk = blk_number_e
+                break
+            else:
+                end_diff = internal_offset_e - end_offset
+                end_blk = blk_number_e
 
-        if end_offset < self.file_size:
-            e_n = 0
-            for idx, b in enumerate(self.blklst):
-                try:
-                    e_n = e_n + hash_table[b].deflated_size
-                except KeyError:
-                    e_n = e_n + len(write_read_cache[b])
-                if e_n < end_offset:
-                    continue
-                else:
-                    end_block = idx
-                    if e_n != end_offset:
-                        subtract_from_end = e_n - end_offset
-                    break
+                break
 
-        # def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset=0, check_integrity=False):
-        a, data = get_file_data(self.blklst, start_block, end_block, offset, end_offset, False)
-
-        if end_block == start_block and self.file_size == end_offset:
-            data = data[len(data)-(end_offset-offset):]  # Edge case when threre is only one block and it is the last one
+        if start_blk == 0 and end_blk == 0:
+            return get_file_data(self.blklst, start_blk, end_blk + 1)[offset:end_offset]
         else:
-            if subtract_from_beggning > 0:
-                data = data[subtract_from_beggning:]
-                # for i in range(0, subtract_from_beggning):
-                #     data.pop(0)
-            if subtract_from_beggning == 0 and len(data) > length:
-                data = data[:length - len(data)]
-            elif subtract_from_end != 0:
-                    data = data[:-subtract_from_end]
+            data = get_file_data(self.blklst, start_blk, end_blk)
 
-        # if len(data) > (end_offset-offset) and end_offset == self.file_size:
-        #     data = data[len(data) - (end_offset - offset):]
+            if self.file_size == end_offset:
+                data = data[-(end_offset-offset):]
+            else:
+                if start_diff < 0:
+                    print(start_diff)
+                if start_blk == 0:
+                    data = data[offset:]
+                elif offset > 0 and start_diff > 0:
+                    data = data[self.blklst[start_blk].size-start_diff:]
+                if end_diff > 0 and len(data) > (end_offset-offset):
+                    data = data[:-end_diff]
 
-        if len(data) != (end_offset-offset):
-            if end_offset == self.file_size:
-                data = data[len(data) - (end_offset - offset):]  # Edge case when threre is only one block and it is the last one
-            # print("Critical Error Reading File")
-            # raise IOError
-        return data  # [offset:end_offset]
+            if data == b'':
+                print("Fuck it")
+
+            if len(data) != (end_offset - offset):
+                print("data problem")
+
+            return data
+
+        # if start_block != 0:
+        #     if s_n == offset:
+        #         at_start = 0
+        #     else:
+        #         at_start = offset - self.blklst[start_block].size
+        #     # return data[subtract_from_beggning:end_offset]
+        #     thing = (bytearray(0) * at_start + data)[offset:end_offset]
+        #     return thing
+        # else:
+        #     return data[offset:end_offset]
+
+        # return ((bytearray(1)*at_start) + data)[offset:end_offset]
 
     def write(self, buffer, offset, write_to_end_of_file):
         if write_to_end_of_file:
@@ -942,17 +987,9 @@ class FileObj(BaseFileObj):
         end_offset = offset + len(buffer)
         if end_offset > self.file_size:
             self.set_file_size(end_offset)
+            self.allocation_size = self.file_size
 
-        self.blklst += dedup(bytes(buffer), allocation_unit)
-        ###
-
-        s = 0
-        for b in self.blklst:
-            try:
-                s = s + hash_table[b].size
-            except KeyError:
-                s = s + len(write_read_cache[b])
-        self.allocation_size = s
+        self.blklst += dedup(bytes(buffer))
 
         return len(buffer)
 
@@ -995,7 +1032,7 @@ class VeratyFileSystemOperations(BaseFileSystemOperations):
 
         self._volume_info = {
             "total_size": max_file_nodes * max_file_size,
-            "free_size":  (max_file_nodes * max_file_size) - get_usage(allocation_unit, len(hash_table))[0],
+            "free_size":  (max_file_nodes * max_file_size) - get_usage()[2],
             "volume_label": volume_label,
         }
 
@@ -1440,6 +1477,9 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
     fs = create_memory_file_system(mountpoint, label, verbose, debug, entries=fs_meta)
 
     try:
+        print("Max Partition Size:" + humanbytes(sys.maxsize))
+        print("Max File size: " + humanbytes(sys.maxsize//2))
+        # '8388608.00 TB'
         print("Starting FS")
         fs.start()
         print("FS started, keep it running forever")
@@ -1448,12 +1488,15 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
         last_commit = time.time()
         persist_data(fs.operations.get_entries())
         while True:
-            if (time.time() - last_commit > write_buffer_lifetime or write_buffer.qsize() > write_buffer_size):
+            if time.time() - last_commit > write_buffer_lifetime+5 and not write_buffer_lock:
                 write_new_blocks(write_buffer)
+                last_commit = time.time()
+                time.sleep(5)
                 # commit_data()
 
             if time.time() - last_gc > gc_interval:
                 print("Used Memory:" + humanbytes(memory()))
+                get_usage()
                 persist_data(fs.operations.get_entries())
 
 
