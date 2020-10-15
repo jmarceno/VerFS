@@ -12,8 +12,8 @@ class MyBTree(IOBTree.BTree):
 
 class Garbage_Collector:
     def __init__(self):
-        self.add_uses = []  # Hash of blocks that should receive an additional use counter
-        self.remove_uses = [] # Hash of blocks that should have their uses counter decreased
+        self.add_uses = deque()  # Hash of blocks that should receive an additional use counter
+        self.remove_uses = deque() # Hash of blocks that should have their uses counter decreased
 
 class DataStore:
     def __init__(self, _chunk, _chunk_size, _path):

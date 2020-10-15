@@ -149,16 +149,16 @@ def persist_data(fs_meta=None):
     global lock
     global GC
     global gc_path
-
-    compressed_pickle(key_index_path, key_index)
-
-    h = hash_table.copy()
-    compressed_pickle(hash_table_path, h)
-
-    compressed_pickle(free_blocks_path, free_blocks)
-
-    compressed_pickle(gc_path, GC)
-
+    
+    
+    compressed_pickle(key_index_path, key_index.copy())    
+    
+    compressed_pickle(hash_table_path, hash_table.copy())
+    
+    compressed_pickle(free_blocks_path, free_blocks.copy())
+    
+    compressed_pickle(gc_path, copy.copy(GC))
+    
     compressed_pickle(fs_meta_path, fs_meta)
 
     return True
@@ -191,8 +191,9 @@ def get_usage():
 
     print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
     print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
-    print("Deduped (Compression) Space Used : " + humanbytes(deduped_compressed) + " [Duplicated data found (Saved Space): " + humanbytes(undeduped_compressed-deduped_compressed) + " ]")
-    print("Compression Rate : " + str(1 - compression_rate) + "%")
+    print("Deduped (Compression) Space Used : " + humanbytes(deduped_compressed) + " [Duplicated data found (Saved Space): " + humanbytes(undeduped_uncompressed -deduped_compressed) + " ]")
+    print("Compression Rate : " + str(1 - compression_rate) + "% Saved Space: " + humanbytes(undeduped_uncompressed - undeduped_compressed))
+    print("Total Savings: " + humanbytes((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)))
 
     del key_index_copy
 
@@ -200,33 +201,25 @@ def get_usage():
 
 
 def garbage_collector():
-    print('Implementation changed. Please recreate this')  # TODO: Reavaliar a necessidade de um garbage collector e reimplementar caso necessário
-    raise NotImplementedError
-    # global free_blocks
-    # global datastore
-    # global hash_table
-    # global key_index
-    # global lock
-    #
-    # to_delete = []
-    # lock.acquire()
-    #
-    # key_index_copy = key_index.copy()
-    # for k in key_index_copy:
-    #     if key_index_copy[k] == 0 and k not in free_blocks:
-    #         try:
-    #             free_blocks.append(hash_table[k])
-    #             to_delete.append(k)
-    #             # datastore[k] = None
-    #         except ValueError:
-    #             print("Garbage Collector: Index inconsistance")
-    #             pass
-    #
-    # for i in to_delete:
-    #     del key_index[i]
-    #     del hash_table[i]
-    #
-    # lock.release()
+    global free_blocks
+    global hash_table
+    global key_index
+
+
+    try:
+        add = GC.add_uses.popleft()
+        hash_table[add].uses = hash_table[add].uses + 1
+    except IndexError:
+        pass
+
+    try:
+        remove = GC.remove_uses.popleft()
+        hash_table[remove].uses = hash_table[remove].uses - 1
+        if hash_table[remove].uses <= 0:
+            hash_table[remove].DELETED = True
+            free_blocks[hash_table[remove].chunk].append(hash_table[idx].offset, hash_table[idx])
+    except IndexError:
+        pass
 
 
 # Checa se a posiçao do datastore já existia no dicionario de indice
@@ -260,7 +253,8 @@ def update_index(idx, chunk=None, add=True):
     else:
         try:
             if in_index and key_index[idx] - key_index[idx] <= 0:
-                free_blocks[chunk].append(hash_table[idx])
+                # free_blocks[chunk].append(hash_table[idx])
+                GC.remove_uses.append(c.hash)
                 hash_table[idx].DELETED = True
                 hash_table[idx].DELETION_TIME = time.time()
                 try:
@@ -277,7 +271,7 @@ def update_index(idx, chunk=None, add=True):
             raise IOError
 
     return True
-    
+
 
 def write_new_blocks(_queued_writes):
     """
@@ -1269,16 +1263,14 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
         while True:
             if time.time() - last_commit > write_buffer_lifetime+5 and not write_buffer_lock:
                 write_new_blocks(write_buffer)
+                garbage_collector()
+                persist_data(fs.operations.get_entries())
                 last_commit = time.time()
-                time.sleep(5)
-                # commit_data()
+                time.sleep(5)                
 
             if time.time() - last_gc > gc_interval:
                 print("Used Memory:" + humanbytes(memory()))
-                get_usage()
-                persist_data(fs.operations.get_entries())
-
-
+                get_usage()                
 
                 # with futures.ThreadPoolExecutor(max_workers=3) as executor:
                 #     executor.submit(get_usage, allocation_unit, len(hash_table))
@@ -1302,6 +1294,8 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
         print("Writing Pending Data...", end='')
         if not write_buffer_lock:
             write_new_blocks(write_buffer)
+            garbage_collector()
+            persist_data(fs.operations.get_entries())
         else:
             while write_buffer_lock:
                 print(".", end='')
