@@ -1,5 +1,7 @@
-# Created by .ignore support plugin (hsz.mobi)
-### Python template
+
+# Created by https://www.gitignore.io/api/python
+
+### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -22,8 +24,6 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -84,13 +84,6 @@ ipython_config.py
 # pyenv
 .python-version
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
-
 # celery beat schedule file
 celerybeat-schedule
 
@@ -121,17 +114,20 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
-# Pyre type checker
-.pyre/
+### Python Patch ###
+.venv/
 
-/.idea/
-/.idea/misc.xml
-/.idea/modules.xml
-/.idea/vcs.xml
-/.idea/VehicleDetectCount.iml
-/.idea/workspace.xml
+### Python.VirtualEnv Stack ###
+# Virtualenv
+# http://iamzed.com/2009/05/07/a-primer-on-virtualenv/
+[Bb]in
+[Ii]nclude
+[Ll]ib
+[Ll]ib64
+[Ll]ocal
+[Ss]cripts
+pyvenv.cfg
+pip-selfcheck.json
 
-/metadata/*.*
 
-/venv37
-/venv38
+# End of https://www.gitignore.io/api/python

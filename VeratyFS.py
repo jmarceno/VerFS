@@ -52,6 +52,10 @@ class MyBTree(IOBTree.BTree):
     max_leaf_size = 500
     max_internal_size = 1000
 
+class Garbage_Collector:
+    def __init__(self):
+        self.add_uses = []  # Hash of blocks that should receive an additional use counter
+        self.remove_uses = [] # Hash of blocks that should have their uses counter decreased
 
 class DataStore:
     def __init__(self, _chunk, _chunk_size, _path):
@@ -72,7 +76,7 @@ class QueuedWrite:
         self.block = 0
         self.result = False
         self.creation_time = time.time()
-        self.compressed = False
+        self.compressed = False        
 
         if len(self.compressed_data) != len(self.data):
             self.compressed = True
@@ -115,6 +119,7 @@ fs_meta = None
 # Blocks = []
 # NEXT_BLOCK_OFFSET = []
 free_blocks = []
+GC = Garbage_Collector()
 
 
 # Buffer de escrita em multiplos da unidade de alocacao
@@ -147,6 +152,7 @@ key_index_path = os.path.join(os.getcwd(), 'metadata', "key_index.vfs")
 fs_meta_path = os.path.join(os.getcwd(), 'metadata', "fs.meta")
 hash_table_path = os.path.join(os.getcwd(), 'metadata', "hash_table.bin")
 free_blocks_path = os.path.join(os.getcwd(), 'metadata', "free_blocks.bin")
+gc_path = os.path.join(os.getcwd(), 'metadata', "gc.vfs")
 
 
 datastore_base_path = os.path.join(os.getcwd(), 'metadata')
@@ -157,7 +163,8 @@ lock = threading.Lock()
 identity_string = b'VeratyFS@v0.0.1@InLineDedup,FixedStoreSize,GC,Compression,FixedBlockSize\n'
 
 
-def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _free_blocks=None, _partition_size=None):
+def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _free_blocks=None, _partition_size=None, _GC=None):
+    debugpy.debug_this_thread()
     global key_index
     global datastore
     global hash_table
@@ -168,6 +175,8 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
     global datastore_path
     global hash_table_path
     global free_blocks_path
+    global gc_path
+    global GC
 #########################
     if _keys is None:
         key_index_path = os.path.join(os.getcwd(), 'metadata', "key_index.vfs")
@@ -176,6 +185,14 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
 
     if os.path.isfile(key_index_path):
         key_index = decompress_pickle(key_index_path)
+#########################
+    if _GC is None:
+        gc_path = os.path.join(os.getcwd(), 'metadata', "gc.vfs")
+    else:
+        gc_path = _GC
+
+    if os.path.isfile(gc_path):
+        GC = decompress_pickle(gc_path)
 #########################
     if _hash is None:
         hash_table_path = os.path.join(os.getcwd(), 'metadata', "hash_table.bin")
@@ -245,6 +262,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
 
 
 def persist_data(fs_meta=None):
+    debugpy.debug_this_thread()
     global key_index
     global datastore
     # global fs_meta
@@ -257,6 +275,8 @@ def persist_data(fs_meta=None):
     global hash_table_path
     global free_blocks_path
     global lock
+    global GC
+    global gc_path
 
     # temp_wr_buffer = write_buffer
 
@@ -270,6 +290,8 @@ def persist_data(fs_meta=None):
 
     # f = free_blocks.copy()
     compressed_pickle(free_blocks_path, free_blocks)
+
+    compressed_pickle(gc_path, GC)
 
     # datastore.flush()  # TODO: Mudar para que sejam persistidas apenas as mudanças feitas
 
@@ -286,6 +308,7 @@ def get_usage():
     Return drive virtual (undeduped size) and physical (deduped_size) utilization
     :return: Undeduped Data Un-Compressed, Undeduped Data Compressed, Deduped Data Compressed, Deduped Data Removed, Compression rate
     """
+    debugpy.debug_this_thread()
     global hash_table
     global key_index
 
@@ -294,10 +317,11 @@ def get_usage():
     deduped_compressed = 0
     compression_rate = 0.0
 
-    for k in key_index:
+    key_index_copy = key_index.copy()
+    for k in key_index_copy:        
         if not hash_table[k].DELETED:
-            undeduped_uncompressed = undeduped_uncompressed + (key_index[k] * hash_table[k].deflated_size)
-            undeduped_compressed = undeduped_compressed + (key_index[k] * hash_table[k].size)
+            undeduped_uncompressed = undeduped_uncompressed + (key_index_copy[k] * hash_table[k].deflated_size)
+            undeduped_compressed = undeduped_compressed + (key_index_copy[k] * hash_table[k].size)
             deduped_compressed = deduped_compressed + hash_table[k].size
 
     if undeduped_compressed != 0 and undeduped_uncompressed != 0:
@@ -306,7 +330,9 @@ def get_usage():
     print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
     print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
     print("Deduped (Compression) Space Used : " + humanbytes(deduped_compressed) + " [Duplicated data found (Saved Space): " + humanbytes(undeduped_compressed-deduped_compressed) + " ]")
-    print("Compression Rate : " + str(compression_rate) + "%")
+    print("Compression Rate : " + str(1 - compression_rate) + "%")
+
+    del key_index_copy
 
     return undeduped_uncompressed, undeduped_compressed, deduped_compressed, (undeduped_compressed-deduped_compressed), compression_rate
 
@@ -355,7 +381,7 @@ def update_index(idx, chunk=None, add=True):
     :param add: Operation. Should the block usage count go up or down?
     :return:
     """
-
+    debugpy.debug_this_thread()
     global key_index
     global lock
     in_index = False
@@ -435,6 +461,7 @@ def write_new_blocks(_queued_writes):
     :param _queued_writes: data to be written
     :return: Tuple with the result of the operation and position (block) that the data has been written to
     """
+    debugpy.debug_this_thread()
     global chunk_size
     global datastore
     global free_blocks
@@ -482,7 +509,7 @@ def write_new_blocks(_queued_writes):
                     written = 0
                     written_hash = ""
                     try:
-                        if os.path.isfile(datastore[q.chunk].path):     # TODO: Organize all the data in one single right
+                        if os.path.isfile(datastore[q.chunk].path):     # TODO: Organize all the data in one single write
                             with open(datastore[q.chunk].path, "r+b") as f:
                                 mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
                                 mm.seek(q.block)
@@ -513,7 +540,7 @@ def write_new_blocks(_queued_writes):
                         hash_table[q.hash].offset = q.block
                         hash_table[q.hash].size = len(q.compressed_data)
                         hash_table[q.hash].deflated_size = len(q.data)
-                        hash_table[q.hash].compressed = q.compressed
+                        hash_table[q.hash].compressed = q.compressed                        
 
                         registers_processed = registers_processed + 1
                         bytes_processed = bytes_processed + written
@@ -545,6 +572,7 @@ def write_new_blocks(_queued_writes):
 
 
 def dedup(data):
+    debugpy.debug_this_thread()
     global datastore
     global free_blocks
     global write_lock
@@ -575,17 +603,15 @@ def dedup(data):
                 for q in queued_writes:   #  Verify if this block has already been processed in this batch
                     if q.hash == c.hash:
                         blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
-                        hash_table[c.hash].uses = hash_table[c.hash].uses + 1
-                        done = True
-                        print("duped")
+                        GC.add_uses.append(c.hash)                        
+                        done = True                        
                         break
                 wb = write_buffer.copy()
-                for w in wb:   #  Verify fi this block is already in the write queue to be writtn
+                for w in wb:   #  Verify if this block is already in the write queue to be writtn
                     if w.hash == c.hash:
                         blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
-                        hash_table[c.hash].uses = hash_table[c.hash].uses + 1
+                        GC.add_uses.append(c.hash)                        
                         done = True
-                        print("duped")
                         break
                 del wb
                 if not done:
@@ -603,6 +629,7 @@ def dedup(data):
 
 
 def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset=0, check_integrity=False):
+    debugpy.debug_this_thread()
     global datastore
     global allocation_unit
     global hash_table
@@ -712,36 +739,6 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
                 data += d
 
     return data
-
-
-def split_data_from_size(data, next_block=True):
-    global header_size
-
-    size = int.from_bytes(data[0:header_size], byteorder='little')
-    if next_block:
-        nextBSize = int.from_bytes(data[-header_size:], byteorder='little')
-        data = data[header_size:-header_size]
-    else:
-        nextBSize = 0
-        data = data[header_size:]
-
-    return data, size, nextBSize
-
-
-def get_next_block_size(data):
-    global header_size
-
-    size = int.from_bytes(data[-header_size:], byteorder='little')
-
-    return size
-
-
-def get_next_block(data):
-    global block_address_size
-
-    size = int.from_bytes(data, byteorder='little')
-
-    return size
 
 
 def seek_in_cache(_blk_hash):
@@ -877,10 +874,6 @@ class FileObj(BaseFileObj):
     #
     #     return s
 
-        # return len(self.blklst) * allocation_unit
-        # return len(get_file_data(self.blklst))
-        # return len(self.data)
-
     def set_allocation_size(self, allocation_size):
         # if allocation_size < self.allocation_size:  # TODO: Checar necessidade desta manipulacao
         #     data = self.prepare_file_data()
@@ -971,19 +964,6 @@ class FileObj(BaseFileObj):
             print("data problem")
 
         return data
-
-        # if start_block != 0:
-        #     if s_n == offset:
-        #         at_start = 0
-        #     else:
-        #         at_start = offset - self.blklst[start_block].size
-        #     # return data[subtract_from_beggning:end_offset]
-        #     thing = (bytearray(0) * at_start + data)[offset:end_offset]
-        #     return thing
-        # else:
-        #     return data[offset:end_offset]
-
-        # return ((bytearray(1)*at_start) + data)[offset:end_offset]
 
     def write(self, buffer, offset, write_to_end_of_file):
         if write_to_end_of_file:
@@ -1450,7 +1430,7 @@ def create_memory_file_system(mountpoint, label="memfs", verbose=True, debug=Fal
     return fs
 
 
-def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_table, _free_blocks, _key_index, _allocation_unit, _compression_type):
+def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_table, _free_blocks, _key_index, _allocation_unit, _compression_type, _GC):
     global fs_meta
     global write_buffer
     global write_buffer_lifetime
@@ -1464,6 +1444,8 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
     global key_index
     global hash_table
     global write_buffer_lock
+    global GC
+    global gc_path
 
     if _compression_type is not None:
         compressed_file_system = _compression_type
@@ -1471,7 +1453,7 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
     try:
         partition_size = _size
         allocation_unit = _allocation_unit
-        datastore, free_blocks, key_index, hash_table, fs_meta = init_persistance(fs_meta, _key_index, _datastore, _hash_table, _free_blocks, _size)
+        datastore, free_blocks, key_index, hash_table, fs_meta = init_persistance(fs_meta, _key_index, _datastore, _hash_table, _free_blocks, _size, _GC)
 
     except Exception:
         print(traceback.format_exc())
@@ -1543,6 +1525,7 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--free_blocks", type=str, default=None)
     parser.add_argument("-u", "--allocation_unit", type=int, default=allocation_unit)  # Allocation Unit in Bytes
     parser.add_argument("-c", "--compression_type", type=str, default=None)
+    parser.add_argument("-g", "--garbage_collector", type=str, default=None)
     args = parser.parse_args()
     main(args.mountpoint, args.label, args.verbose, args.debug, args.meta, args.datastore, args.size, args.hash,
-         args.free_blocks, args.keys, args.allocation_unit, args.compression_type)
+         args.free_blocks, args.keys, args.allocation_unit, args.compression_type, args.garbage_collector)
