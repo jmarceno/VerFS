@@ -12,9 +12,8 @@ import traceback
 import lzma
 import multiprocessing as mp
 import math
-from decimal import *
+# from decimal import *
 import struct
-from cache import LRU
 from hashing import hashed_chunks, hash_data
 from concurrent import futures
 from stats import Timer, humanbytes, memory
@@ -29,6 +28,8 @@ import argparse
 import threading
 from functools import wraps, lru_cache
 from pathlib import Path, PureWindowsPath
+
+from configurations import *
 
 from winfspy import (
     FileSystem,
@@ -48,119 +49,7 @@ from winfspy.plumbing.win32_filetime import filetime_now
 from winfspy.plumbing.security_descriptor import SecurityDescriptor
 
 
-class MyBTree(IOBTree.BTree):
-    max_leaf_size = 500
-    max_internal_size = 1000
-
-class Garbage_Collector:
-    def __init__(self):
-        self.add_uses = []  # Hash of blocks that should receive an additional use counter
-        self.remove_uses = [] # Hash of blocks that should have their uses counter decreased
-
-class DataStore:
-    def __init__(self, _chunk, _chunk_size, _path):
-        self.chunk = _chunk
-        self.size = _chunk_size
-        self.path = _path
-        self.next_write_position = 0
-        self.IS_FULL = False
-
-
-class QueuedWrite:
-    def __init__(self, _idx, _hash, _data):
-        self.idx = _idx
-        self.hash = _hash
-        self.data = _data
-        self.compressed_data = self.__compress__()
-        self.chunk = 0
-        self.block = 0
-        self.result = False
-        self.creation_time = time.time()
-        self.compressed = False        
-
-        if len(self.compressed_data) != len(self.data):
-            self.compressed = True
-
-    def __compress__(self):
-        compressed, d = compress_data(self.data)
-        # d = len(d).to_bytes(2, byteorder='little') + d
-
-        return d
-
-
-class Block:
-    def __init__(self):
-        self.chunk = 0
-        self.offset = 0  # Offset dentro do chunk
-        self.hash = ""
-        self.size = 0  # Tamanho depois da compressao
-        self.deflated_size = 0  # Tamanho sem compressao
-        self.uses = 1
-        self.compressed = False
-        self.DELETED = False
-        self.DELETION_TIME = time.time()
-
-
-class FileBlock:
-    def __init__(self, _hash, _size):
-        self.hash = _hash
-        self.size = _size
-
-
-
-"""
-Bunch of stuff to test the concept. Change this shit later to something useful fast and safe
-"""
-datastore = []
-key_index = {}
-hash_table = {}
-fs_meta = None
-
-# Blocks = []
-# NEXT_BLOCK_OFFSET = []
-free_blocks = []
-GC = Garbage_Collector()
-
-
-# Buffer de escrita em multiplos da unidade de alocacao
-# sendo assim os arquivos serão persistidos a cada X blocos/unidades de alocacao, sendo X o write_buffer_size ou a cada
-# Y segundos, sendo Y o write_buffer_lifetime
-write_read_cache = {}
-write_buffer = deque()  # queue.Queue()
-write_buffer_size = 3000
-write_buffer_lifetime = 15
-write_buffer_lock = False
-gc_interval = 60  # Intervalo entre o final de uma operação de GC e o inicio de outra
-
-under_fetch_limit = 2
-over_fetch_limit = 6  # 64 blocks of 16k = 1MB
-over_read_limit = 2097152  # Number of bytes that will be read at each interaction of the read loop. This is effectivily a cache
-cache_size = 50000  # Cache size in entries. Memory size is ~cache_size*allocation_unit
-read_cache = LRU(maxlen=cache_size)
-header_size = 2
-block_address_size = 5
-
-partition_size = 4  # Partion size in GB
-ds_size = partition_size * 1073741824
-allocation_unit = 16384
-read_allocation_unit = 1024*128
-chunk_size_per_GB = 1
-chunk_size = int(math.ceil(chunk_size_per_GB * 1073741824))
-datastore_chunks_number = int(math.ceil(ds_size/chunk_size))  # DataStore chunks equal to one every GB of partition size
-
-key_index_path = os.path.join(os.getcwd(), 'metadata', "key_index.vfs")
-fs_meta_path = os.path.join(os.getcwd(), 'metadata', "fs.meta")
-hash_table_path = os.path.join(os.getcwd(), 'metadata', "hash_table.bin")
-free_blocks_path = os.path.join(os.getcwd(), 'metadata', "free_blocks.bin")
-gc_path = os.path.join(os.getcwd(), 'metadata', "gc.vfs")
-
-
-datastore_base_path = os.path.join(os.getcwd(), 'metadata')
-datastore_chunks = list(range(0, datastore_chunks_number))
-
 lock = threading.Lock()
-
-identity_string = b'VeratyFS@v0.0.1@InLineDedup,FixedStoreSize,GC,Compression,FixedBlockSize\n'
 
 
 def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _free_blocks=None, _partition_size=None, _GC=None):
@@ -177,7 +66,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
     global free_blocks_path
     global gc_path
     global GC
-#########################
+
     if _keys is None:
         key_index_path = os.path.join(os.getcwd(), 'metadata', "key_index.vfs")
     else:
@@ -185,7 +74,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
 
     if os.path.isfile(key_index_path):
         key_index = decompress_pickle(key_index_path)
-#########################
+
     if _GC is None:
         gc_path = os.path.join(os.getcwd(), 'metadata', "gc.vfs")
     else:
@@ -193,7 +82,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
 
     if os.path.isfile(gc_path):
         GC = decompress_pickle(gc_path)
-#########################
+
     if _hash is None:
         hash_table_path = os.path.join(os.getcwd(), 'metadata', "hash_table.bin")
     else:
@@ -202,7 +91,6 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
     if os.path.isfile(hash_table_path):
         hash_table = decompress_pickle(hash_table_path)
 
-#########################
     if _free_blocks is None:
         free_blocks_path = os.path.join(os.getcwd(), 'metadata', "free_blocks.bin")
     else:
@@ -211,7 +99,6 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
     if os.path.isfile(free_blocks_path):
         free_blocks = decompress_pickle(free_blocks_path)
 
-##########################
     if _fs_meta is None:
         fs_meta_path = os.path.join(os.getcwd(), 'metadata', "fs.meta")
     else:
@@ -219,7 +106,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
 
     if os.path.isfile(fs_meta_path):
         fs_meta = decompress_pickle(fs_meta_path)
-#########################
+
     if _datastore is None:
         datastore_path = os.path.join(os.getcwd(), 'metadata')
     else:
@@ -229,34 +116,20 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
         chunk_path = os.path.join(os.getcwd(), 'metadata', 'chunk' + str(chunk) + '.ds.vfs')
 
         if os.path.isfile(chunk_path):
-            raise NotImplementedError
-            pass
-            # ds = open(datastore_path, "r+b")
-            # datastore[chunk] = mmap.mmap(ds.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
-            # datastore = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
+            print("Found existing File System. Re-mounting it. Chunk:" +str(chunk))
+            datastore.append(DataStore(chunk, chunk_size, chunk_path))
         else:
             f = open(os.path.join(os.getcwd(), 'metadata', 'chunk'+str(chunk)+'.ds.vfs'), "wb")
             f.write(b'\x00\x00\x00\x00\x00')
             f.flush()
             f.close()
             ds = open(chunk_path, "r+b")
-            # datastore.append(mmap.mmap(ds.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE))
             tmp_map = mmap.mmap(ds.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
             datastore.append(DataStore(chunk, chunk_size, chunk_path))
-            # datastore.append(chunk_path)
-            # datastore = mmap.mmap(ds.fileno(), length=0, access=mmap.ACCESS_WRITE)
             tmp_map.close()
             ds.close()
-            # with open(chunk_path, "wb") as out:
-            #     out.truncate(chunk_size)
-            # with open(chunk_path, "wb") as out:
-            #     out.seek((1024 * 1024 * 1024) - 1)
-            #     out.write(b'0')
 
-            # for n in list(range(0, chunk_size+allocation_unit, allocation_unit))[:-3]):
-            # free_blocks.append(list(range(0, chunk_size+allocation_unit, allocation_unit))[:-3])
             free_blocks.append([IOBTree.IOBTree()])
-            # NEXT_BLOCK_OFFSET.append([0])
 
     return datastore, free_blocks, key_index, hash_table, fs_meta
 
@@ -269,8 +142,7 @@ def persist_data(fs_meta=None):
     global key_index_path
     global fs_meta_path
     global datastore_path
-    global write_buffer
-    global write_lock
+    global write_buffer    
     global hash_table
     global hash_table_path
     global free_blocks_path
@@ -278,26 +150,16 @@ def persist_data(fs_meta=None):
     global GC
     global gc_path
 
-    # temp_wr_buffer = write_buffer
-
-    # keys = key_index.copy()
     compressed_pickle(key_index_path, key_index)
-    # pickle.dump(keys, open(key_index_path, "wb"))
 
     h = hash_table.copy()
     compressed_pickle(hash_table_path, h)
-    # pickle.dump(h, open(hash_table_path, "wb"))
 
-    # f = free_blocks.copy()
     compressed_pickle(free_blocks_path, free_blocks)
 
     compressed_pickle(gc_path, GC)
 
-    # datastore.flush()  # TODO: Mudar para que sejam persistidas apenas as mudanças feitas
-
-    # _fs_meta = copy.deepcopy(fs_meta)
     compressed_pickle(fs_meta_path, fs_meta)
-    # pickle.dump(_fs_meta, open(fs_meta_path, "wb"))
 
     return True
 
@@ -415,44 +277,7 @@ def update_index(idx, chunk=None, add=True):
             raise IOError
 
     return True
-
-
-def get_size_and_data(data):
-    return data[0:4], data[4:]
-
-
-# def update_hash_table(_hash, _block=None, _chunk_number=None, _operation=1):
-#     """
-#     Updates the hash_table in a thread safe way, preventig the dict changes while looping through it
-#
-#     :param _chunk_number: Number of the chunk where the block is contained
-#     :param _hash: The hash to be used as the dict key
-#     :param _block: block number to be used as dict value
-#     :param _operation: 1: Add , -1:Remove, 0: Update
-#     """
-#     global hash_table
-#
-#     if _operation == 1:
-#         if _chunk_number is not None:
-#             hash_table[_hash] = str(_block)+','+str(_chunk_number)
-#         else:
-#             print("This operation needs the chunk number.")
-#             raise IOError
-#     elif _operation == -1:
-#         hash_table[_hash].DELETED = True
-#         hash_table[_hash].DELETION_TIME = time.time()
-#     elif _operation == 0:
-#         if _chunk_number is not None:
-#             hash_table[_hash] = str(_block)+','+str(_chunk_number)
-#         else:
-#             print("This operation needs the chunk number.")
-#             raise IOError
-#     else:
-#         print("Invalid Operation")
-#         return False
-#
-#     return True
-
+    
 
 def write_new_blocks(_queued_writes):
     """
@@ -574,8 +399,7 @@ def write_new_blocks(_queued_writes):
 def dedup(data):
     debugpy.debug_this_thread()
     global datastore
-    global free_blocks
-    global write_lock
+    global free_blocks    
     global hash_table
     global lock
     global read_cache
@@ -596,7 +420,6 @@ def dedup(data):
 
             if c.hash in hash_table:
                 blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
-                print("duped")
                 update_index(c.hash)
             else:
                 done = False
@@ -637,7 +460,7 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
 
     data = bytearray()
 
-    cached = False
+    cached = False    
     r = bytearray()
 
     for idx, b in enumerate(blklst):
@@ -678,43 +501,12 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
                     read_size = hash_table[b.hash].size
 
                 if os.path.isfile(datastore[_chunk].path):
-                    with open(datastore[_chunk].path, "r+b", buffering=allocation_unit) as f:
+                    with open(datastore[_chunk].path, "r+b", buffering=over_read_limit) as f:
                         mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
                         mm.seek(_block)
                         r = mm.read(read_size + over_read_limit)
                         d = r[:read_size]
                         r = r[read_size:]
-
-                        # d = mm[_block:read_size]
-                        # d, own_size, nextBSize = split_data_from_size(d, next_block=False)
-
-                        # if _block + over_read_limit < mm.size():    # TODO: Change to read until the end of the chunk if possible
-                        #     over_read_data = mm[_block:over_read_limit]
-                        #     d, own, nextBSize = split_data_from_size(over_read_data[:read_size + header_size])
-                        #
-                        #     over_read_data = over_read_data[read_size+header_size:]
-                        #     next_read = over_read_data[:nextBSize + header_size]
-                        #     if nextBSize != 0:
-                        #         while len(over_read_data) > nextBSize + header_size:
-                        #             try:
-                        #                 to_cache, own, nextBSize = split_data_from_size(next_read)
-                        #                 to_cache = decompress_data(to_cache)
-                        #                 read_cache[hash_data(to_cache)] = to_cache
-                        #                 over_read_data = over_read_data[nextBSize + header_size]
-                        #             except:
-                        #                 break
-                        # else:
-                        #     d = mm[_block:mm.size()]
-                        #     d, own_size, nextBSize = split_data_from_size(d, next_block=False)
-
-                        # if not cached:
-                        #     cached = True
-                        #     for i in range(0, over_fetch_limit + 1):
-                        #         if mm.tell() + nextBSize > mm.size():
-                        #             break
-                        #         dat = mm[mm.tell():mm.tell() + nextBSize + header_size]
-                        #         dat, own_size, nextBSize = split_data_from_size(dat)
-                        #         read_cache[hash_data(dat)] = dat
 
                         if hash_table[b.hash].compressed:
                             decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
@@ -970,10 +762,11 @@ class FileObj(BaseFileObj):
             offset = self.file_size
         end_offset = offset + len(buffer)
         if end_offset > self.file_size:
-            self.set_file_size(end_offset)
-            self.allocation_size = self.file_size
+            self.set_file_size(end_offset)       
 
         self.blklst += dedup(bytes(buffer))
+
+        self.allocation_size = self.file_size
 
         return len(buffer)
 
@@ -1504,6 +1297,18 @@ def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_tabl
                 # usage = mp.Process(target=get_usage, args=())
                 # usage.start()
                 # usage.join()
+    except KeyboardInterrupt:
+        print("Finalizing File System. Please wait...")
+        print("Writing Pending Data...", end='')
+        if not write_buffer_lock:
+            write_new_blocks(write_buffer)
+        else:
+            while write_buffer_lock:
+                print(".", end='')
+                time.sleep(1)
+        print('.')
+        print('Persisting Metadata....')
+        persist_data(fs.operations.get_entries())
 
     finally:
         print("Stopping FS")

@@ -20,7 +20,7 @@ compression_trigger = 0.9  # How much the data has to be compressed for it to be
 
 
 # Pickle a file and then compress it into a file with extension
-def compressed_pickle(path, data, format=4):
+def compressed_pickle(path, data, format=1):
     """
 
     :param path:
@@ -41,7 +41,7 @@ def compressed_pickle(path, data, format=4):
 
 
 # Load any compressed pickle file
-def decompress_pickle(file, format=4):
+def decompress_pickle(file, format=1):
     """
 
     :param file:
