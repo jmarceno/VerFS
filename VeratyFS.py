@@ -1,3 +1,6 @@
+import debugpy
+debugpy.debug_this_thread()
+
 #import concurrent
 import gc
 import os.path
@@ -12,7 +15,6 @@ import math
 from decimal import *
 import struct
 from cache import LRU
-from numba import jit
 from hashing import hashed_chunks, hash_data
 from concurrent import futures
 from stats import Timer, humanbytes, memory
@@ -905,6 +907,8 @@ class FileObj(BaseFileObj):
         self.file_size = file_size
 
     def read(self, offset, length):
+        debugpy.debug_this_thread()
+        
         if offset >= self.file_size:
             raise NTStatusEndOfFile()
         end_offset = min(self.file_size, offset + length)
@@ -960,13 +964,13 @@ class FileObj(BaseFileObj):
                 if end_diff > 0 and len(data) > (end_offset-offset):
                     data = data[:-end_diff]
 
-            if data == b'':
-                print("Fuck it")
+        if data == b'':
+            print("Fuck it")
 
-            if len(data) != (end_offset - offset):
-                print("data problem")
+        if len(data) != (end_offset - offset):
+            print("data problem")
 
-            return data
+        return data
 
         # if start_block != 0:
         #     if s_n == offset:
