@@ -15,6 +15,7 @@ lzma_filters = [
 
 zlib_compression_level = 6
 bz2_compression_level = 1
+lz4_compression_level = frame.COMPRESSIONLEVEL_MINHC
 
 compression_trigger = 0.9  # How much the data has to be compressed for it to be worth. Rates below that will cause the data to not be compressed
 
@@ -71,7 +72,7 @@ def compress_data(data, _format=1):
     """
     _format = int(_format)
     if _format == 1:
-        cp_data = frame.compress(data)
+        cp_data = frame.compress(data, compression_level=lz4_compression_level)
         if len(cp_data) < len(data):
             if len(cp_data) / len(data) < compression_trigger:
                 # print(str(len(cp_data) / len(data)))

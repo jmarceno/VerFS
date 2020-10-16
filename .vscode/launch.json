@@ -10,7 +10,25 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "args": ["X:", "-l", "jardelFS"]
+            "args": [
+                "X:",
+                "-l",
+                "jardelFS"
+            ]
+        },
+        {
+            "name": "Python: Current File - Debug Verbose",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "-d",
+                "-v",
+                "X:",
+                "-l",
+                "jardelFS"
+            ]
         }
     ]
 }

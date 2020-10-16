@@ -181,10 +181,13 @@ def get_usage():
 
     key_index_copy = key_index.copy()
     for k in key_index_copy:        
-        if not hash_table[k].DELETED:
-            undeduped_uncompressed = undeduped_uncompressed + (key_index_copy[k] * hash_table[k].deflated_size)
-            undeduped_compressed = undeduped_compressed + (key_index_copy[k] * hash_table[k].size)
-            deduped_compressed = deduped_compressed + hash_table[k].size
+        try:
+            if not hash_table[k].DELETED:
+                undeduped_uncompressed = undeduped_uncompressed + (key_index_copy[k] * hash_table[k].deflated_size)
+                undeduped_compressed = undeduped_compressed + (key_index_copy[k] * hash_table[k].size)
+                deduped_compressed = deduped_compressed + hash_table[k].size
+        except KeyError:
+            continue
 
     if undeduped_compressed != 0 and undeduped_uncompressed != 0:
         compression_rate = undeduped_compressed/undeduped_uncompressed
@@ -217,7 +220,7 @@ def garbage_collector():
         hash_table[remove].uses = hash_table[remove].uses - 1
         if hash_table[remove].uses <= 0:
             hash_table[remove].DELETED = True
-            free_blocks[hash_table[remove].chunk].append(hash_table[idx].offset, hash_table[idx])
+            free_blocks[hash_table[remove].chunk].append(hash_table[remove].offset, hash_table[remove])
     except IndexError:
         pass
 
@@ -254,7 +257,7 @@ def update_index(idx, chunk=None, add=True):
         try:
             if in_index and key_index[idx] - key_index[idx] <= 0:
                 # free_blocks[chunk].append(hash_table[idx])
-                GC.remove_uses.append(c.hash)
+                GC.remove_uses.append(idx)
                 hash_table[idx].DELETED = True
                 hash_table[idx].DELETION_TIME = time.time()
                 try:
@@ -308,7 +311,7 @@ def write_new_blocks(_queued_writes):
                             else:
                                 ds.next_write_position = ds.next_write_position + len(q.data)
                             q.chunk = ds.chunk
-                            if ds.next_write_position + 32768 > ds.size:
+                            if ds.next_write_position + max_blk_size > ds.size:
                                 ds.IS_FULL = True
 
                             break
@@ -649,7 +652,7 @@ class FileObj(BaseFileObj):
 #        self.blklist = []  # Blocos no datastore que compoem o arquivo
         ###
         self.attributes |= FILE_ATTRIBUTE.FILE_ATTRIBUTE_ARCHIVE
-        self.allocation_size = 0
+        self.allocation_size = allocation_size
         assert not self.attributes & FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY
 
     # @property
@@ -661,29 +664,38 @@ class FileObj(BaseFileObj):
     #     return s
 
     def set_allocation_size(self, allocation_size):
-        # if allocation_size < self.allocation_size:  # TODO: Checar necessidade desta manipulacao
+        if allocation_size < self.allocation_size:  # TODO: Checar necessidade desta manipulacao
+            self.allocation_size = self.file_size+max_blk_size
+        elif allocation_size == self.file_size:
+            self.allocation_size = self.file_size+max_blk_size
+        else:
+            self.allocation_size = max(self.allocation_size, self.allocation_size+max_blk_size)
         #     data = self.prepare_file_data()
         #     data = data[:allocation_size]
         #     # self.data = self.data[:allocation_size]
         # if allocation_size > self.allocation_size:
         #     pass
-            # self.data += bytearray(allocation_size - self.allocation_size)
-            # self.data += bytearray(allocation_size - self.allocation_size)
+            # self.data += bytearray(allocation_size - self.allocation_size)            
         # assert self.allocation_size == allocation_size
-        self.file_size = min(self.file_size, allocation_size)
+        # self.allocation_size = self.file_size+max_blk_size
+
+        # self.file_size = min(self.file_size, allocation_size)  - Ultimo, voltar esse caso de merda
 
     def adapt_allocation_size(self, file_size):
-        units = (file_size + allocation_unit - 1) // allocation_unit
-        self.set_allocation_size(units * allocation_unit)
+        # self.set_allocation_size(file_size)
+        # units = (file_size + allocation_unit - 1) // allocation_unit
+        # self.set_allocation_size(units * allocation_unit)
+        self.set_allocation_size(file_size+max_blk_size)
 
     def set_file_size(self, file_size):
         if file_size < self.file_size:
             pass
+        else:
+            self.file_size = file_size
             # zeros = bytearray(self.file_size - file_size)
             # self.data[file_size: self.file_size] = zeros
         if file_size > self.allocation_size:
-            self.adapt_allocation_size(file_size)
-        self.file_size = file_size
+            self.adapt_allocation_size(file_size)        
 
     def read(self, offset, length):
         debugpy.debug_this_thread()
@@ -708,8 +720,8 @@ class FileObj(BaseFileObj):
             else:
                 start_blk = blk_number
                 start_diff = internal_offset - offset
-                if start_diff > 32769:
-                    print("tomar no cu")
+                # if start_diff > 32769:
+                #     print("tomar no cu")
                 break
 
         internal_offset_e = 0
@@ -748,7 +760,8 @@ class FileObj(BaseFileObj):
 
         if len(data) != (end_offset - offset):
             print("data problem")
-
+        # if offset > 546870912:
+        #     print(offset)
         return data
 
     def write(self, buffer, offset, write_to_end_of_file):
@@ -1086,7 +1099,6 @@ class VeratyFileSystemOperations(BaseFileSystemOperations):
 
     @operation
     def read(self, file_context, offset, length):
-        # file_context.file_obj.prepare_file_data()
         return file_context.file_obj.read(offset, length)
 
     @operation
@@ -1095,6 +1107,7 @@ class VeratyFileSystemOperations(BaseFileSystemOperations):
             raise NTStatusMediaWriteProtected()
 
         if constrained_io:
+            print("write constrained IO")
             return file_context.file_obj.constrained_write(buffer, offset)
         else:
             return file_context.file_obj.write(buffer, offset, write_to_end_of_file)

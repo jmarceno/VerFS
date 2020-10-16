@@ -1,0 +1,18 @@
+2020.10.16-00.02.41:info:====== App Start Binary Viewer.exe ====  Binary Viewer 6.17.04.26 Start============ 
+2020.10.16-00.02.41:info: Starting with argument :
+2020.10.16-00.02.41:info: VerySimpleList View: ctor-start
+2020.10.16-00.02.41:info: VerySimpleList View: ctor-end
+2020.10.16-00.02.42:info: VerySimpleList View: ctor-start
+2020.10.16-00.02.42:info: VerySimpleList View: ctor-end
+2020.10.16-00.02.42:info: VerySimpleList View: ctor-start
+2020.10.16-00.02.42:info: VerySimpleList View: ctor-end
+2020.10.16-00.02.43:info: Starting Main Form;usage count: 0
+2020.10.16-00.19.09:info:====== App Start Binary Viewer.exe ====  Binary Viewer 6.17.04.26 Start============ 
+2020.10.16-00.19.09:info: Starting with argument :
+2020.10.16-00.19.09:info: VerySimpleList View: ctor-start
+2020.10.16-00.19.09:info: VerySimpleList View: ctor-end
+2020.10.16-00.19.09:info: VerySimpleList View: ctor-start
+2020.10.16-00.19.09:info: VerySimpleList View: ctor-end
+2020.10.16-00.19.09:info: VerySimpleList View: ctor-start
+2020.10.16-00.19.09:info: VerySimpleList View: ctor-end
+2020.10.16-00.19.10:info: Starting Main Form;usage count: 0

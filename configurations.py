@@ -88,17 +88,21 @@ gc_interval = 60  # Intervalo entre o final de uma operação de GC e o inicio d
 
 under_fetch_limit = 2
 over_fetch_limit = 6  # 64 blocks of 16k = 1MB
-over_read_limit = 2097152*4  # Number of bytes that will be read at each interaction of the read loop. This is effectivily a cache
+over_read_limit = 2097152*10  # Number of bytes that will be read at each interaction of the read loop. This is effectivily a cache
 cache_size = 50000  # Cache size in entries. Memory size is ~cache_size*allocation_unit
 read_cache = LRU(maxlen=cache_size)
 header_size = 2
 block_address_size = 5
 
+min_blk_size = 1024*32
+mean_blk_size = 1024*64
+max_blk_size = 1024*128
+
 partition_size = 4  # Partion size in GB
 ds_size = partition_size * 1073741824
 allocation_unit = 16384
 read_allocation_unit = 1024*128
-chunk_size_per_GB = 1
+chunk_size_per_GB = 4
 chunk_size = int(ceil(chunk_size_per_GB * 1073741824))
 datastore_chunks_number = int(ceil(ds_size/chunk_size))  # DataStore chunks equal to one every GB of partition size
 

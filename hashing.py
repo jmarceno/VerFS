@@ -1,17 +1,15 @@
 from fastcdc import fastcdc  #  list(fastcdc(d1, 4096, 8192, 16384))
 import xxhash
+import hashlib
 
-min_blk_size = 1024*16
-mean_blk_size = 1024*24
-max_blk_size = 1024*32
+from configurations import min_blk_size, mean_blk_size, max_blk_size
 
-
-def hashed_chunks(data, fat=True, hf=xxhash.xxh3_128):
+def hashed_chunks(data, fat=True, hf=hashlib.sha256):
     return list(fastcdc(data, min_blk_size, mean_blk_size, max_blk_size, fat=fat, hf=hf))
 
 
 def hash_data(data):
-    return xxhash.xxh3_128(data).hexdigest()
+    return hashlib.sha256(data).hexdigest()
 
 # def hash_data(_data):
 #     """

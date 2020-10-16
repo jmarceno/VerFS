@@ -1,0 +1,604 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Settings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <VisualizerColorMapsForPersitor>
+    <VisualizerColorMap>
+      <Name>Standard</Name>
+      <MapDescription>Basic predefined map</MapDescription>
+      <IsDefault>true</IsDefault>
+      <Colors Web="Yellow" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="Orange" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="LightGreen" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Red" />
+      <Colors Web="Blue" />
+      <ColorDescriptions>
+        <string>Null</string>
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string>Tab</string>
+        <string>CR</string>
+        <string />
+        <string />
+        <string>LF</string>
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string>Printable ASCII character</string>
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+        <string />
+      </ColorDescriptions>
+    </VisualizerColorMap>
+  </VisualizerColorMapsForPersitor>
+  <DefaultBookmarkColor Web="Orange" />
+  <DefaultMappedStructureColor Web="BurlyWood" />
+  <DefalutBookmarkAlpha>48</DefalutBookmarkAlpha>
+  <DefalutMappedStructureAlpha>48</DefalutMappedStructureAlpha>
+  <InsertOvewriteMode>Replace</InsertOvewriteMode>
+  <VisualizerDisplayMode>Linear</VisualizerDisplayMode>
+  <InsertOverwriteRadioButtonInsertSelected>false</InsertOverwriteRadioButtonInsertSelected>
+  <NonAsciCharacterReplacement>◦</NonAsciCharacterReplacement>
+  <SearchInMemoryTextEncoding>ASCII</SearchInMemoryTextEncoding>
+  <SearchInFilesTextEncoding>ASCII</SearchInFilesTextEncoding>
+  <OverWrittenFontStyle>Underline</OverWrittenFontStyle>
+  <OverwrittenBrushColor Web="Red" />
+  <InsertedFontStyle>Regular</InsertedFontStyle>
+  <InsertedBrushColor Web="Green" />
+  <UnchangedFontStyle>Regular</UnchangedFontStyle>
+  <UnchangedBrushColor Web="Black" />
+  <SearchInFilesFileMask>*.*</SearchInFilesFileMask>
+  <SearchInFilesIcludeDirectories>true</SearchInFilesIcludeDirectories>
+  <SearchInFilesIncludeADS>true</SearchInFilesIncludeADS>
+  <AutoSaveInMins>10</AutoSaveInMins>
+  <SaveSelection_TextFormatIncludeAddressColumn>true</SaveSelection_TextFormatIncludeAddressColumn>
+  <SaveSelection_chkIgnoreNewLines>false</SaveSelection_chkIgnoreNewLines>
+  <SaveSelection_AddressViewMode xsi:nil="true" />
+  <SaveSelection_comboBoxGroupPrefixIndex>3</SaveSelection_comboBoxGroupPrefixIndex>
+  <SaveSelection_comboBoxGroupSuffixIndex>0</SaveSelection_comboBoxGroupSuffixIndex>
+  <SaveSelection_LittleEdianChecked>true</SaveSelection_LittleEdianChecked>
+  <SaveSelection_comboBoxFormatStyleIndex>1</SaveSelection_comboBoxFormatStyleIndex>
+  <SaveSelection_comboBoxNumberOfBytesPerGroupIndex>1</SaveSelection_comboBoxNumberOfBytesPerGroupIndex>
+  <SaveSelection_BytesPerLine xsi:nil="true" />
+  <CheckForNewestVersionTimestamp>2020-10-16T00:19:14.0946929-03:00</CheckForNewestVersionTimestamp>
+  <ActiveSelectionColor Web="LightSteelBlue" />
+  <InActiveSelectionColor Web="AliceBlue" />
+  <ShowHexInUpperCase>true</ShowHexInUpperCase>
+  <VerboseLogging>false</VerboseLogging>
+  <ShowHotAddress>true</ShowHotAddress>
+  <DataColumns>2</DataColumns>
+  <MRU>
+    <string>D:\_Projetos\VeratyFS\metadata\chunk0.ds.vfs</string>
+  </MRU>
+  <UsageCount>0</UsageCount>
+  <CaseSensitiveSearch>true</CaseSensitiveSearch>
+  <X>192</X>
+  <Y>108</Y>
+  <Width>1536</Width>
+  <Height>864</Height>
+  <CultureName>en-US</CultureName>
+  <AddressViewMode>Hex</AddressViewMode>
+  <VisualizerAddressViewMode>Hex</VisualizerAddressViewMode>
+  <UnsignedIntegerFormat>ZeroPadding</UnsignedIntegerFormat>
+  <FirstColumnViewMode>
+    <Mode>Hexadecimal</Mode>
+    <Endianness>LittleEndian</Endianness>
+    <SizeInBytes>1</SizeInBytes>
+  </FirstColumnViewMode>
+  <SecondColumnViewMode>
+    <Mode>Text_Ascii</Mode>
+    <Endianness>LittleEndian</Endianness>
+    <SizeInBytes>1</SizeInBytes>
+  </SecondColumnViewMode>
+  <BytesPerLine>16</BytesPerLine>
+  <VisualizerBytesPerLine>256</VisualizerBytesPerLine>
+  <VisualizerZoomFactor>1</VisualizerZoomFactor>
+  <VisualizerDensity>1</VisualizerDensity>
+  <ViewerFont>
+    <FontFamily>Courier New</FontFamily>
+    <GraphicsUnit>Point</GraphicsUnit>
+    <Size>8.25</Size>
+    <Style>Regular</Style>
+  </ViewerFont>
+  <LoggerFont>
+    <GraphicsUnit>World</GraphicsUnit>
+    <Size>0</Size>
+    <Style>Regular</Style>
+  </LoggerFont>
+  <PagePrintPageSetupLeftMargin>50</PagePrintPageSetupLeftMargin>
+  <PagePrintPageSetupRightMargin>50</PagePrintPageSetupRightMargin>
+  <PagePrintPageSetupTopMargin>50</PagePrintPageSetupTopMargin>
+  <PagePrintPageSetupBottomMargin>50</PagePrintPageSetupBottomMargin>
+  <PagePrintPageSetupLanscape>false</PagePrintPageSetupLanscape>
+  <LogHistoryInDays>10</LogHistoryInDays>
+</Settings>
