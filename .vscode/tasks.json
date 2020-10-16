@@ -6,7 +6,8 @@
         {
             "label": "Clean Metadata Folder",
             "type": "shell",
-            "command": "D:\\_Projetos\\VeratyFS\\test\\metadata_clean.bat"
+            "command": "D:\\_Projetos\\VeratyFS\\test\\metadata_clean.bat",
+            "problemMatcher": []
         },
         {
             "label": "Copy all Teste Data",

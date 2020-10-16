@@ -129,7 +129,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
             tmp_map.close()
             ds.close()
 
-            free_blocks.append([IOBTree.IOBTree()])
+            free_blocks.append(IOBTree.IOBTree())
 
     return datastore, free_blocks, key_index, hash_table, fs_meta
 
@@ -223,7 +223,12 @@ def garbage_collector():
             hash_table[remove].uses = hash_table[remove].uses - 1
             if hash_table[remove].uses <= 0:
                 hash_table[remove].DELETED = True
-                free_blocks[hash_table[remove].chunk].append(hash_table[remove].offset, hash_table[remove])
+                # free_blocks[hash_table[remove].chunk].append(hash_table[remove].offset, hash_table[remove])                
+                try:
+                    free_blocks[hash_table[remove].chunk].get(hash_table[remove].size).append(hash_table[remove].offset)
+                except AttributeError:
+                    free_blocks[hash_table[remove].chunk].insert(hash_table[remove].size, [hash_table[remove].offset])
+                
     except IndexError:
         pass
 
@@ -323,8 +328,12 @@ def write_new_blocks(_queued_writes):
                             continue
                         else:
                             for fb in free_blocks:
-                                try:
-                                    q.block = fb[0].minKey(len(q.compressed_data)).pop(0)
+                                try:                                    
+                                    s = fb.minKey(len(q.compressed_data))
+                                    q.block = fb.get(s).pop[0]
+                                    if len(fb.get(s)) == 0:
+                                        fb.pop(s)
+                                    # free_blocks[hash_table[remove].chunk][0].pop(hash_table[remove].offset)
                                     break
                                 except ValueError:
                                     if idx == len(free_blocks) - 1:
