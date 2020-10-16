@@ -30,6 +30,7 @@ from functools import wraps, lru_cache
 from pathlib import Path, PureWindowsPath
 
 from configurations import *
+from datastructures import *
 
 from winfspy import (
     FileSystem,
@@ -150,16 +151,20 @@ def persist_data(fs_meta=None):
     global GC
     global gc_path
     
+    if not compressed_pickle(key_index_path, key_index.copy()):
+        print("DEBUG: Persistence of Key Index Deferred.")
     
-    compressed_pickle(key_index_path, key_index.copy())    
+    if not compressed_pickle(hash_table_path, hash_table.copy()):
+        print("DEBUG: Persistence of Hash Table Deferred.")
     
-    compressed_pickle(hash_table_path, hash_table.copy())
+    if not compressed_pickle(free_blocks_path, free_blocks.copy()):
+        print("DEBUG: Persistence of Free Blocks Deferred.")
     
-    compressed_pickle(free_blocks_path, free_blocks.copy())
+    if not compressed_pickle(gc_path, copy.copy(GC)):
+        print("DEBUG: Persistence of GC Deferred.")
     
-    compressed_pickle(gc_path, copy.copy(GC))
-    
-    compressed_pickle(fs_meta_path, fs_meta)
+    if not compressed_pickle(fs_meta_path, fs_meta):
+        print("DEBUG: Persistence File System Meta Info Deferred.")
 
     return True
 
@@ -322,21 +327,20 @@ def write_new_blocks(_queued_writes):
                             q.chunk = ds.chunk
                             if ds.next_write_position + max_blk_size > ds.size:
                                 ds.IS_FULL = True
-
                             break
                         elif idx != len(datastore)-1:
                             continue
                         else:
-                            for fb in free_blocks:
+                            for ds, fb in enumerate(free_blocks):
                                 try:                                    
                                     s = fb.minKey(len(q.compressed_data))
-                                    q.block = fb.get(s).pop[0]
+                                    q.block = fb.get(s).pop(0)
                                     if len(fb.get(s)) == 0:
                                         fb.pop(s)
                                     # free_blocks[hash_table[remove].chunk][0].pop(hash_table[remove].offset)
                                     break
                                 except ValueError:
-                                    if idx == len(free_blocks) - 1:
+                                    if ds == len(free_blocks) - 1:
                                         print("Partition FULL. No free blocks that can fit the data.")
                                         raise NTStatusAccessDenied
                                     else:

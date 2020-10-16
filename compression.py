@@ -31,9 +31,19 @@ def compressed_pickle(path, data, format=1):
     """
     format = int(format)
     if format == 1:
-        n_data = deepcopy(data)
-        with bz2.BZ2File(path, 'w') as f:
-            cPickle.dump(n_data, f)
+        
+        if type(data) == dict:
+            n_data = { k : v for k,v in data.items() if v}
+        else:
+            n_data = data
+
+        try:
+            with bz2.BZ2File(path, 'w') as f:
+                cPickle.dump(n_data, f)
+                return True
+        except RuntimeError:
+            return False
+        
     elif format == 2:
         raise NotImplementedError
     elif format == 3:
