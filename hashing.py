@@ -4,12 +4,12 @@ import hashlib
 
 from configurations import min_blk_size, mean_blk_size, max_blk_size
 
-def hashed_chunks(data, fat=True, hf=hashlib.sha256):
+def hashed_chunks(data, fat=True, hf=xxhash.xxh3_64):
     return list(fastcdc(data, min_blk_size, mean_blk_size, max_blk_size, fat=fat, hf=hf))
 
 
 def hash_data(data):
-    return hashlib.sha256(data).hexdigest()
+    return xxhash.xxh3_64(data).hexdigest()
 
 # def hash_data(_data):
 #     """

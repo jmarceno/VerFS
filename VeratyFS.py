@@ -204,23 +204,26 @@ def get_usage():
 
 
 def garbage_collector():
+    debugpy.debug_this_thread()
     global free_blocks
     global hash_table
     global key_index
 
 
-    try:
-        add = GC.add_uses.popleft()
-        hash_table[add].uses = hash_table[add].uses + 1
+    try:        
+        while len(GC.add_uses) > 0:
+            add = GC.add_uses.popleft()
+            hash_table[add].uses = hash_table[add].uses + 1            
     except IndexError:
         pass
 
-    try:
-        remove = GC.remove_uses.popleft()
-        hash_table[remove].uses = hash_table[remove].uses - 1
-        if hash_table[remove].uses <= 0:
-            hash_table[remove].DELETED = True
-            free_blocks[hash_table[remove].chunk].append(hash_table[remove].offset, hash_table[remove])
+    try:        
+        while len(GC.remove_uses) > 0:
+            remove = GC.remove_uses.popleft()
+            hash_table[remove].uses = hash_table[remove].uses - 1
+            if hash_table[remove].uses <= 0:
+                hash_table[remove].DELETED = True
+                free_blocks[hash_table[remove].chunk].append(hash_table[remove].offset, hash_table[remove])
     except IndexError:
         pass
 
@@ -244,6 +247,7 @@ def update_index(idx, chunk=None, add=True):
     global lock
     in_index = False
 
+    
     if idx in key_index:
         in_index = True
 
@@ -354,15 +358,15 @@ def write_new_blocks(_queued_writes):
                     if len(q.compressed_data) == written or len(q.data) == written:
                         q.result = True
                         # update_hash_table(q.hash, q.block, q.chunk, 1)
-                        update_index(q.hash, q.chunk, True)
-
                         hash_table[q.hash] = Block()
                         hash_table[q.hash].hash = q.hash
                         hash_table[q.hash].chunk = q.chunk
                         hash_table[q.hash].offset = q.block
                         hash_table[q.hash].size = len(q.compressed_data)
                         hash_table[q.hash].deflated_size = len(q.data)
-                        hash_table[q.hash].compressed = q.compressed                        
+                        hash_table[q.hash].compressed = q.compressed
+
+                        update_index(q.hash, q.chunk, True)
 
                         registers_processed = registers_processed + 1
                         bytes_processed = bytes_processed + written
@@ -1114,6 +1118,8 @@ class VeratyFileSystemOperations(BaseFileSystemOperations):
 
     @operation
     def cleanup(self, file_context, file_name, flags) -> None:
+        debugpy.debug_this_thread()
+        
         if self.read_only:
             raise NTStatusMediaWriteProtected()
 
@@ -1135,7 +1141,7 @@ class VeratyFileSystemOperations(BaseFileSystemOperations):
             # Delete immediately
             try:
                 for b in file_obj.blklst:
-                    update_index(b, False)
+                    update_index(b.hash, chunk=None, add=False)
                 del self._entries[file_obj.path]
             except KeyError:
                 raise NTStatusObjectNameNotFound()

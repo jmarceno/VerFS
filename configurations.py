@@ -102,7 +102,7 @@ partition_size = 4  # Partion size in GB
 ds_size = partition_size * 1073741824
 allocation_unit = 16384
 read_allocation_unit = 1024*128
-chunk_size_per_GB = 4
+chunk_size_per_GB = 0.5
 chunk_size = int(ceil(chunk_size_per_GB * 1073741824))
 datastore_chunks_number = int(ceil(ds_size/chunk_size))  # DataStore chunks equal to one every GB of partition size
 

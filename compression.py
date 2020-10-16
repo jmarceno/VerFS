@@ -7,6 +7,7 @@ import _pickle as cPickle
 from _bz2 import BZ2Decompressor
 import struct
 import traceback
+from copy import deepcopy
 
 lzma_filters = [
     {"id": lzma.FILTER_DELTA, "dist": 5},
@@ -30,8 +31,9 @@ def compressed_pickle(path, data, format=1):
     """
     format = int(format)
     if format == 1:
+        n_data = deepcopy(data)
         with bz2.BZ2File(path, 'w') as f:
-            cPickle.dump(data, f)
+            cPickle.dump(n_data, f)
     elif format == 2:
         raise NotImplementedError
     elif format == 3:
