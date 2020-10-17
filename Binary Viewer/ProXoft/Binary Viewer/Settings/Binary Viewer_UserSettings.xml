@@ -558,12 +558,14 @@
   <ShowHotAddress>true</ShowHotAddress>
   <DataColumns>2</DataColumns>
   <MRU>
+    <string>D:\_Projetos\VeratyFS\metadata\smbs\22\b2\22b2b468d110349f</string>
+    <string>D:\_Projetos\VeratyFS\metadata\smbs\00\2e\002e704ae2246c02</string>
     <string>D:\_Projetos\VeratyFS\metadata\chunk0.ds.vfs</string>
   </MRU>
-  <UsageCount>0</UsageCount>
+  <UsageCount>1</UsageCount>
   <CaseSensitiveSearch>true</CaseSensitiveSearch>
-  <X>192</X>
-  <Y>108</Y>
+  <X>235</X>
+  <Y>96</Y>
   <Width>1536</Width>
   <Height>864</Height>
   <CultureName>en-US</CultureName>

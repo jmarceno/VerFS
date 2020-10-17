@@ -131,7 +131,9 @@ dmypy.json
 /.idea/VehicleDetectCount.iml
 /.idea/workspace.xml
 
-/metadata/*.*
+/metadata/
 
 /venv37
 /venv38
+/Binary Viewer/
+/Binary Viewer/

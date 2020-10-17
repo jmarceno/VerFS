@@ -34,3 +34,11 @@ WMI
 wrapt
 zipp
 zope.interface
+flask
+flask_login
+flask_migrate
+flask_wtf
+flask_sqlalchemy==2.*
+email_validator
+python-decouple
+gunicorn

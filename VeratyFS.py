@@ -168,6 +168,16 @@ def persist_data(fs_meta=None):
 
     return True
 
+def get_small_blocks_real_size(start_path = '.'):
+    total_size = 0
+    for dirpath, dirnames, filenames in os.walk(start_path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            # skip if it is symbolic link
+            if not os.path.islink(fp):
+                total_size += os.path.getsize(fp)
+
+    return total_size
 
 def get_usage():
     """
@@ -317,50 +327,63 @@ def write_new_blocks(_queued_writes):
             q = write_buffer.popleft()
             if not q.result:
                 try:
-                    for idx, ds in enumerate(datastore):
-                        if not ds.IS_FULL:
-                            q.block = ds.next_write_position
-                            if q.compressed:
-                                ds.next_write_position = ds.next_write_position + len(q.compressed_data)
-                            else:
-                                ds.next_write_position = ds.next_write_position + len(q.data)
-                            q.chunk = ds.chunk
-                            if ds.next_write_position + max_blk_size > ds.size:
-                                ds.IS_FULL = True
-                            break
-                        elif idx != len(datastore)-1:
-                            continue
-                        else:
-                            for ds, fb in enumerate(free_blocks):
-                                try:                                    
-                                    s = fb.minKey(len(q.compressed_data))
-                                    q.block = fb.get(s).pop(0)
-                                    if len(fb.get(s)) == 0:
-                                        fb.pop(s)
-                                    # free_blocks[hash_table[remove].chunk][0].pop(hash_table[remove].offset)
-                                    break
-                                except ValueError:
-                                    if ds == len(free_blocks) - 1:
-                                        print("Partition FULL. No free blocks that can fit the data.")
-                                        raise NTStatusAccessDenied
-                                    else:
-                                        continue
                     written = 0
                     written_hash = ""
-                    try:
-                        if os.path.isfile(datastore[q.chunk].path):     # TODO: Organize all the data in one single write
-                            with open(datastore[q.chunk].path, "r+b") as f:
-                                mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
-                                mm.seek(q.block)
+
+                    if len(q.compressed_data) <= small_block_limit:
+                        if q.compressed:
+                            written = len(q.compressed_data)
+                            write_small_block(q.hash, q.compressed_data)
+                            written_hash = hash_data(q.compressed_data)
+                            q.chunk = -1                            
+                        else:
+                            written = len(q.data)
+                            write_small_block(q.hash, q.data)
+                            written_hash = hash_data(q.data)
+                            q.chunk = -1                        
+                    else:
+                        for idx, ds in enumerate(datastore):
+                            if not ds.IS_FULL:
+                                q.block = ds.next_write_position
                                 if q.compressed:
-                                    written = mm.write(q.compressed_data)
-                                    written_hash = hash_data(q.compressed_data)
+                                    ds.next_write_position = ds.next_write_position + len(q.compressed_data)
                                 else:
-                                    written = mm.write(q.data)
-                                    written_hash = hash_data(q.data)
-                    except ValueError:
-                        print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
-                        print(traceback.format_exc())
+                                    ds.next_write_position = ds.next_write_position + len(q.data)
+                                q.chunk = ds.chunk
+                                if ds.next_write_position + max_blk_size > ds.size:
+                                    ds.IS_FULL = True
+                                break
+                            elif idx != len(datastore)-1:
+                                continue
+                            else:
+                                for ds, fb in enumerate(free_blocks):
+                                    try:                                    
+                                        s = fb.minKey(len(q.compressed_data))
+                                        q.block = fb.get(s).pop(0)
+                                        if len(fb.get(s)) == 0:
+                                            fb.pop(s)
+                                        # free_blocks[hash_table[remove].chunk][0].pop(hash_table[remove].offset)
+                                        break
+                                    except ValueError:
+                                        if ds == len(free_blocks) - 1:
+                                            print("Partition FULL. No free blocks that can fit the data.")
+                                            raise NTStatusAccessDenied
+                                        else:
+                                            continue                    
+                        try:
+                            if os.path.isfile(datastore[q.chunk].path):     # TODO: Organize all the data in one single write
+                                with open(datastore[q.chunk].path, "r+b") as f:
+                                    mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
+                                    mm.seek(q.block)
+                                    if q.compressed:
+                                        written = mm.write(q.compressed_data)
+                                        written_hash = hash_data(q.compressed_data)
+                                    else:
+                                        written = mm.write(q.data)
+                                        written_hash = hash_data(q.data)
+                        except ValueError:
+                            print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
+                            print(traceback.format_exc())
 
                     if not q.compressed and written_hash != q.hash:
                         print("Data corruption - Hash inconsistance")
@@ -389,8 +412,7 @@ def write_new_blocks(_queued_writes):
                             print('DESGRAÇA')
                         continue
                     else:
-                        print(
-                            "IOError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
+                        print("IOError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
                         print(traceback.format_exc())
                         raise IOError
 
@@ -496,6 +518,16 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
                     d = r[:b.size]
                     r = r[b.size:]
                     read_cache[b.hash] = d
+            
+            if hash_table[b.hash].chunk == -1:
+                try:
+                    d = read_small_block(b.hash)
+                    if hash_table[b.hash].compressed:
+                            d = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read                    
+                    read_cache[b.hash] = d
+                except Exception:
+                    print(traceback.format_exc())
+                    pass
 
             if d is None:
                 try:

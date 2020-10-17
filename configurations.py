@@ -41,6 +41,7 @@ block_address_size = 5
 min_blk_size = 1024*32
 mean_blk_size = 1024*64
 max_blk_size = 1024*128
+small_block_limit = min_blk_size // 2    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
 partition_size = 4  # Partion size in GB
 ds_size = partition_size * 1073741824

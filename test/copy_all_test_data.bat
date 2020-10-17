@@ -4,4 +4,4 @@ cd /d c:\temp\test_data
 xcopy /s C:\temp\test_data X:\
 
 cd /d x:
-fciv.exe -v  -xml db.xml
+fciv.exe -v -r -xml db.xml -sha1
