@@ -1,5 +1,5 @@
 {
     "git.ignoreLimitWarning": true,
-    "python.pythonPath": "d:\\_Projetos\\VeratyFS\\venv\\Scripts\\python.exe",
+    "python.pythonPath": "venv/bin/python",
     "terminal.integrated.shell.windows": "C:\\Windows\\System32\\cmd.exe"
 }
