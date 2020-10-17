@@ -237,8 +237,11 @@ def garbage_collector():
             remove = GC.remove_uses.popleft()
             hash_table[remove].uses = hash_table[remove].uses - 1
             if hash_table[remove].uses <= 0:
+                if hash_table[remove].size <= small_block_limit:
+                    r = delete_small_block(remove)
+                    if not r:
+                        print("DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete.")
                 hash_table[remove].DELETED = True
-                # free_blocks[hash_table[remove].chunk].append(hash_table[remove].offset, hash_table[remove])                
                 try:
                     free_blocks[hash_table[remove].chunk].get(hash_table[remove].size).append(hash_table[remove].offset)
                 except AttributeError:
@@ -402,6 +405,9 @@ def write_new_blocks(_queued_writes):
                         hash_table[q.hash].deflated_size = len(q.data)
                         hash_table[q.hash].compressed = q.compressed
 
+                        if len(q.compressed_data) <= small_block_limit:
+                            small_block_read_cache[q.hash] = q.data
+
                         update_index(q.hash, q.chunk, True)
 
                         registers_processed = registers_processed + 1
@@ -451,7 +457,7 @@ def dedup(data):
 
         ch = variable_chunks(data)
         for c in ch:
-            read_cache[c.hash] = c.data
+            # read_cache[c.hash] = c.data
             blk_list.append(0)
 
             if c.hash in hash_table:
@@ -524,7 +530,7 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
                     d = read_small_block(b.hash)
                     if hash_table[b.hash].compressed:
                             d = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read                    
-                    read_cache[b.hash] = d
+                    small_block_read_cache[b.hash] = d
                 except Exception:
                     print(traceback.format_exc())
                     pass
@@ -586,7 +592,10 @@ def seek_in_cache(_blk_hash):
         try:
             return write_read_cache[_blk_hash]
         except KeyError:
-            return None
+            try:
+                return small_block_read_cache[_blk_hash]
+            except KeyError:
+                return None
 
 
 def chunks(lst, n):

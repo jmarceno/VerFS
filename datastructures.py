@@ -1,6 +1,7 @@
 import debugpy
 debugpy.debug_this_thread()
 
+import traceback
 from BTrees import IOBTree
 from collections import deque
 import time
@@ -99,32 +100,31 @@ def write_small_block(_hash, data):
     if not os.path.exists(directory):
         os.makedirs(directory)
     
-    # data = base64.b64encode(data)
-
-    if _hash == '22b2b468d110349f':
-        print("stop please")
-
     w = 0
     with open(full_path, "wb") as f:        
         w = f.write(data)
     
-    return w
-        # f = open(os.path.join(os.getcwd(), 'metadata', 'chunk'+str(chunk)+'.ds.vfs'), "wb")
-        # f.write(b'\x00\x00\x00\x00\x00')
-        # f.flush()
-        # f.close()
+    return w        
 
-    
+
 def read_small_block(_hash):
     debugpy.debug_this_thread()
     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
     full_path = os.path.join(directory, _hash)
-    
-    if _hash == '22b2b468d110349f':
-        print("stop please")
 
     with open(full_path, "rb") as small_block:
-        # r = small_block.read()
-        # return base64.b64decode(r)
         return small_block.read()
-        
+
+
+def delete_small_block(_hash):
+    debugpy.debug_this_thread()
+    directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
+    full_path = os.path.join(directory, _hash)
+
+    try:
+        os.remove(full_path)
+        return True
+    except Exception:
+        print(traceback.format_exc())
+        return False
+    

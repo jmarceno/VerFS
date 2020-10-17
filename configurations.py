@@ -33,8 +33,10 @@ gc_interval = 60  # Intervalo entre o final de uma operação de GC e o inicio d
 under_fetch_limit = 2
 over_fetch_limit = 6  # 64 blocks of 16k = 1MB
 over_read_limit = 2097152*10  # Number of bytes that will be read at each interaction of the read loop. This is effectivily a cache
-cache_size = 50000  # Cache size in entries. Memory size is ~cache_size*allocation_unit
+cache_size = 100000  # Cache size in entries. Memory size is ~cache_size*allocation_unit
 read_cache = LRU(maxlen=cache_size)
+small_block_cache_size = 300000
+small_block_read_cache =LRU(maxlen=small_block_cache_size)
 header_size = 2
 block_address_size = 5
 
