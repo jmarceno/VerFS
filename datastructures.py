@@ -22,10 +22,12 @@ class MyBTree(IOBTree.BTree):
     max_leaf_size = 500
     max_internal_size = 1000
 
+
 class Garbage_Collector:
     def __init__(self):
         self.add_uses = deque()  # Hash of blocks that should receive an additional use counter
         self.remove_uses = deque() # Hash of blocks that should have their uses counter decreased
+
 
 class DataStore:
     def __init__(self, _chunk, _chunk_size, _path):
@@ -74,10 +76,10 @@ class File_Inode:
 
 
 class Directory_Inode:
-    def __init__(self, contents_tree):
-        self.row_id = len(contents_tree)
+    def __init__(self, inode):        
+        # self.row_id = row_id
         self.name = ""
-        self.inode = None
+        self.inode = inode
         self.parent_inode = None
     
 
