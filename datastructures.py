@@ -1,5 +1,5 @@
-import debugpy
-debugpy.debug_this_thread()
+# import debugpy
+# debugpy.debug_this_thread()
 
 import traceback
 from BTrees import IOBTree
@@ -12,10 +12,10 @@ import _pickle as cPickle
 import json
 import base64
 
-import persistent
-import transaction
-import ZODB
-import ZODB.FileStorage
+# import persistent
+# import transaction
+# import ZODB
+# import ZODB.FileStorage
 
 
 class MyBTree(IOBTree.BTree):
@@ -57,6 +57,30 @@ class QueuedWrite:
 
         return d
 
+
+class File_Inode:
+    def __init__(self, _id):
+        self.id = _id
+        self.uid = 0
+        self.gid = 0
+        self.mode = 0
+        self.mtime_ns = time.time_ns()
+        self.atime_ns = time.time_ns()
+        self.ctime_ns = time.time_ns()
+        self.target = ""
+        self.size = 0
+        self.rdev = 0
+        self.data = [] # List of FileBlock 's
+
+
+class Directory_Inode:
+    def __init__(self, contents_tree):
+        self.row_id = len(contents_tree)
+        self.name = ""
+        self.inode = None
+        self.parent_inode = None
+    
+
 class Block:
     def __init__(self):
         self.chunk = 0
@@ -92,7 +116,7 @@ class SmallBlock:
 
 
 def write_small_block(_hash, data):
-    debugpy.debug_this_thread()
+    # debugpy.debug_this_thread()
 
     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
     full_path = os.path.join(directory, _hash)
@@ -108,7 +132,7 @@ def write_small_block(_hash, data):
 
 
 def read_small_block(_hash):
-    debugpy.debug_this_thread()
+    # debugpy.debug_this_thread()
     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
     full_path = os.path.join(directory, _hash)
 
@@ -117,7 +141,7 @@ def read_small_block(_hash):
 
 
 def delete_small_block(_hash):
-    debugpy.debug_this_thread()
+    # debugpy.debug_this_thread()
     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
     full_path = os.path.join(directory, _hash)
 

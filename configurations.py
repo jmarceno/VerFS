@@ -1,5 +1,5 @@
 from collections import deque
-from BTrees import IOBTree
+from BTrees import IOBTree, OOBTree
 from math import ceil
 from cache import LRU
 from compression import compressed_pickle, decompress_pickle, decompress_data, compress_data
@@ -19,6 +19,9 @@ fs_meta = None
 # NEXT_BLOCK_OFFSET = []
 free_blocks = []
 GC = Garbage_Collector()
+
+inodes = IOBTree.IOBTree()
+contents = OOBTree.OOBTree() #IOBTree.IOBTree()
 
 # Buffer de escrita em multiplos da unidade de alocacao
 # sendo assim os arquivos serão persistidos a cada X blocos/unidades de alocacao, sendo X o write_buffer_size ou a cada
@@ -46,8 +49,9 @@ max_blk_size = 1024*128
 small_block_limit = min_blk_size // 2    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
 partition_size = 4  # Partion size in GB
+partition_size_gb = partition_size * 1073741824
 ds_size = partition_size * 1073741824
-allocation_unit = 16384
+allocation_unit = 1024
 read_allocation_unit = 1024*128
 chunk_size_per_GB = 0.5
 chunk_size = int(ceil(chunk_size_per_GB * 1073741824))
