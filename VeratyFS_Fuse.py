@@ -203,7 +203,7 @@ class Operations(pyfuse3.Operations):
         self._remove(inode_p, name, entry)
 
     def _remove(self, inode_p, name, entry):
-        if self.contents[entry.st_ino].inode != inode_p_old and self.contents[entry.st_ino].parent_inode == inode_p_old and self.contents[entry.st_ino].name != name:
+        if self.contents[entry.st_ino].inode != inode_p and self.contents[entry.st_ino].parent_inode == inode_p and self.contents[entry.st_ino].name != name:
             raise pyfuse3.FUSEError(errno.ENOTEMPTY)
         
         for e in list(self.contents.keys()): #TODO: LENTO MUDAR
