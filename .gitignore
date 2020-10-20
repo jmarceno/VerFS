@@ -132,6 +132,7 @@ dmypy.json
 /.idea/workspace.xml
 
 /metadata/
+/metadata/smbs
 
 /venv37
 /venv38
