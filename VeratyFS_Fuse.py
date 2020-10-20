@@ -203,15 +203,17 @@ class Operations(pyfuse3.Operations):
         self._remove(inode_p, name, entry)
 
     def _remove(self, inode_p, name, entry):
-        if self.count_parent_entries(entry.st_ino) > 0:
+        if self.contents[entry.st_ino].inode != inode_p_old and self.contents[entry.st_ino].parent_inode == inode_p_old and self.contents[entry.st_ino].name != name:
             raise pyfuse3.FUSEError(errno.ENOTEMPTY)
         
         for e in list(self.contents.keys()): #TODO: LENTO MUDAR
             if self.contents[e].name == name and self.contents[e].parent_inode == inode_p:
-                self.contents.pop(e)
+                removed = self.contents.pop(e)                
 
         if entry.st_nlink == 1 and entry.st_ino not in self.inode_open_count:
-            self.inodes.pop(entry.st_ino)
+            removed = self.inodes.pop(entry.st_ino)
+            for b in removed.data:
+                update_index(b.hash, chunk=None, add=False)
 
     async def symlink(self, inode_p, name, target, ctx):
         mode = (stat.S_IFLNK | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
@@ -248,8 +250,12 @@ class Operations(pyfuse3.Operations):
     def _replace(self, inode_p_old, name_old, inode_p_new, name_new,
                  entry_old, entry_new):
 
-        if self.count_parent_entries(entry_new.st_ino) > 0:        
-            raise pyfuse3.FUSEError(errno.ENOTEMPTY)
+        for c in self.contents:            
+            if self.contents[c].inode != inode_p_old and self.contents[c].parent_inode == inode_p_old and self.contents[c].name != name_old and str('.trashinfo.') not in str(name_new) and str('.trashinfo.') not in str(name_old):
+                raise pyfuse3.FUSEError(errno.ENOTEMPTY)
+        
+        # if self.count_parent_entries(entry_new.st_ino) > 0:        
+        #     raise pyfuse3.FUSEError(errno.ENOTEMPTY)
 
         old = self.contents.pop(name_old)
         new_d = Directory_Inode(self.contents)
@@ -261,7 +267,9 @@ class Operations(pyfuse3.Operations):
         if entry_new.st_nlink == 1 and entry_new.st_ino not in self.inode_open_count:
             for i in list(self.inodes.keys()):
                 if self.inodes.get(i).id == entry_new.st_ino:
-                    self.inodes.pop(i)             
+                    removed = self.inodes.pop(i)
+                    for b in removed.data:
+                        update_index(b.hash, chunk=None, add=False)
 
 
     async def link(self, inode, new_inode_p, new_name, ctx):
