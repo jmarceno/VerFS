@@ -62,8 +62,8 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
 
     if os.path.isfile(fs_meta_path):
         fs_meta = decompress_pickle(fs_meta_path)
-        inodes = fs_meta[0]
-        contents = fs_meta[1]
+        # inodes = fs_meta[0]
+        # contents = fs_meta[1]
 
     if _datastore is None:
         datastore_path = os.path.join(os.getcwd(), 'metadata')
