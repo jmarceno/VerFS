@@ -18,6 +18,8 @@ fragmentation = {}
 fragmentation['free_size'] = 0
 fragmentation['free_count'] = 0
 
+performance_measure_bars = True
+
 # Blocks = []
 # NEXT_BLOCK_OFFSET = []
 free_blocks = []
@@ -34,8 +36,8 @@ write_buffer = deque()  # queue.Queue()
 write_buffer_size = 3000
 write_buffer_lifetime = 15
 write_buffer_lock = False
-gc_interval = 1  # Intervalo entre o final de uma operação de GC e o inicio de outra
-
+gc_interval = 3  # Intervalo entre o final de uma operação de GC e o inicio de outra
+usage_interval = 5 # Time in seconds to update the usage couters
 
 under_fetch_limit = 2
 over_fetch_limit = 6  # 64 blocks of 16k = 1MB

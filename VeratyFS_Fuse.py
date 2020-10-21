@@ -62,8 +62,9 @@ datastore, free_blocks, key_index, hash_table, fs_meta, GC = init_persistance()
 global_data = {'datastore':datastore, 'free_blocks':free_blocks, 'key_index':key_index, 'hash_table':hash_table, 'fs_meta': fs_meta, 'GC': GC}
 write_buffer_lock = False
 
-from progress_bars import space_bar_compression_rate, space_bar_free_space, space_bar_savings, write_bar, dedup_bar, space_bar_over_used
-from progress_bars import space_bar_used, frag_bar_blocks, frag_bar_space, memory_bar_active, memory_bar_inactive, memory_bar_statck
+if performance_measure_bars:
+    from progress_bars import space_bar_compression_rate, space_bar_free_space, space_bar_savings, write_bar, dedup_bar, space_bar_over_used
+    from progress_bars import space_bar_used, frag_bar_blocks, frag_bar_space, memory_bar_active, memory_bar_inactive, memory_bar_statck, GC_bar
 
 try:
     if global_data['fs_meta'][0] is not None:
@@ -236,9 +237,13 @@ class Operations(pyfuse3.Operations):
                 break
 
         if entry.st_nlink == 1 and entry.st_ino not in self.inode_open_count:
-            removed = self.inodes.pop(entry.st_ino)
-            for b in removed.data:
-                update_index(b.hash, chunk=None, add=False)
+            try:
+                removed = self.inodes.pop(entry.st_ino)
+                for b in removed.data:
+                    update_index(b.hash, chunk=None, add=False)
+            except KeyError:
+                print(traceback.format_exc())
+                print("Key already removed")
 
     async def symlink(self, inode_p, name, target, ctx):
         mode = (stat.S_IFLNK | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
@@ -565,57 +570,49 @@ def get_usage():
         try:
             if not hash_table[k].DELETED:
                 undeduped_uncompressed = undeduped_uncompressed + (key_index_copy[k] * hash_table[k].deflated_size)
-                undeduped_compressed = undeduped_compressed + (key_index_copy[k] * hash_table[k].size)
+                undeduped_compressed = undeduped_compressed + (max(0, key_index_copy[k]) * hash_table[k].size)
                 deduped_compressed = deduped_compressed + hash_table[k].size
         except KeyError:
             continue
 
-        try:
-            undeduped_compressed = undeduped_compressed - fragmentation['free_size']
-            deduped_compressed = undeduped_compressed - fragmentation['free_size']
-        except:
-            pass
-
     fragmenation_size = fragmentation['free_size']
     fragmenation_quant = fragmentation['free_count']
-
-    
+   
     if undeduped_compressed != 0 and undeduped_uncompressed != 0:
         compression_rate = undeduped_compressed/undeduped_uncompressed
-
     
+    if performance_measure_bars:
+        space_bar_used.reset()
+        space_bar_used.n = min((deduped_compressed //1024//1024), (partition_size_gb//1024//1024))
+        space_bar_used.refresh()
 
-    space_bar_used.reset()
-    space_bar_used.n = min((deduped_compressed //1024//1024), (partition_size_gb//1024//1024))
-    space_bar_used.refresh()
+        space_bar_savings.reset()
+        space_bar_savings.n = ((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed - deduped_compressed))//1024//1024
+        space_bar_savings.refresh()
 
-    space_bar_savings.reset()
-    space_bar_savings.n = ((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed - deduped_compressed))//1024//1024
-    space_bar_savings.refresh()
+        compbar = (1 - compression_rate)
+        if compbar == 1:
+            compbar = 0
 
-    compbar = (1 - compression_rate)
-    if compbar == 1:
-        compbar = 0
+        space_bar_compression_rate.reset()
+        space_bar_compression_rate.n = max(0.0, round(compbar*100, 3))
+        space_bar_compression_rate.refresh()
 
-    space_bar_compression_rate.reset()
-    space_bar_compression_rate.n = max(0.0, round(compbar*100, 3))
-    space_bar_compression_rate.refresh()
+        space_bar_free_space.reset()
+        space_bar_free_space.n = max(0,(partition_size_gb - (deduped_compressed)) //1024//1024)
+        space_bar_free_space.refresh()
 
-    space_bar_free_space.reset()
-    space_bar_free_space.n = max(0,(partition_size_gb - (fragmenation_size + deduped_compressed)) //1024//1024)
-    space_bar_free_space.refresh()
+        space_bar_over_used.reset()
+        space_bar_over_used.n = max(0, (deduped_compressed //1024//1024) - (partition_size_gb//1024//1024))
+        space_bar_over_used.refresh()
 
-    space_bar_over_used.reset()
-    space_bar_over_used.n = max(0, (deduped_compressed //1024//1024) - (partition_size_gb//1024//1024))
-    space_bar_over_used.refresh()
+        frag_bar_space.reset()
+        frag_bar_space.n = max(0, fragmentation['free_size'] //1024//1024)
+        frag_bar_space.refresh()
 
-    frag_bar_space.reset()
-    frag_bar_space.n = max(0, fragmentation['free_size'] //1024//1024)
-    frag_bar_space.refresh()
-
-    frag_bar_blocks.reset()
-    frag_bar_blocks.n = fragmentation['free_count'] 
-    frag_bar_blocks.refresh()
+        frag_bar_blocks.reset()
+        frag_bar_blocks.n = fragmentation['free_count'] 
+        frag_bar_blocks.refresh()
     
     # print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
     # print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
@@ -633,12 +630,19 @@ def garbage_collector():
     global free_blocks
     global hash_table
     global key_index
+    global fragmentation
 
+    if performance_measure_bars:
+        # GC_bar.reset()
+        GC_bar.total = GC_bar.total + (len(GC.add_uses) + len(GC.remove_uses))
+        GC_bar.refresh()
 
     try:        
         while len(GC.add_uses) > 0:
             add = GC.add_uses.popleft()
-            hash_table[add].uses = hash_table[add].uses + 1            
+            hash_table[add].uses = hash_table[add].uses + 1 
+            if performance_measure_bars:
+                GC_bar.update(1)
     except IndexError:
         pass
 
@@ -647,29 +651,22 @@ def garbage_collector():
             remove = GC.remove_uses.popleft()
             hash_table[remove].uses = hash_table[remove].uses - 1
             if hash_table[remove].uses <= 0:
+                hash_table[remove].DELETED = True
                 if hash_table[remove].size <= small_block_limit:
                     r = delete_small_block(remove)
                     if not r:
-                        print("DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete.")
-                hash_table[remove].DELETED = True
-                try:
-                    free_blocks[hash_table[remove].chunk].get(hash_table[remove].size).append(hash_table[remove].offset)
-                    key_index['free_size'] = key_index['free_size'] + hash_table[remove].size
-                    key_index['free_count'] = key_index['free_count'] + 1
-                except AttributeError:
-                    free_blocks[hash_table[remove].chunk].insert(hash_table[remove].size, [hash_table[remove].offset])
-                    key_index['free_size'] = hash_table[remove].size
-                    key_index['free_count'] =1
+                        print("DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete.")                
+                else:
+                    try:
+                        free_blocks[hash_table[remove].chunk].get(hash_table[remove].size).append(hash_table[remove].offset)                    
+                    except AttributeError:
+                        free_blocks[hash_table[remove].chunk].insert(hash_table[remove].size, [hash_table[remove].offset])
+                    finally:
+                        fragmentation['free_size'] = fragmentation['free_size'] + hash_table[remove].size
+                        fragmentation['free_count'] = fragmentation['free_count'] + 1
+            if performance_measure_bars:
+                GC_bar.update(1)                    
 
-                try:
-                    key_index['free_size'] = key_index['free_size'] + hash_table[remove].size
-                    key_index['free_count'] = key_index['free_count'] + 1
-                except:
-                    key_index['free_size'] = hash_table[remove].size
-                    key_index['free_count'] =1
-
-
-                
     except IndexError:
         pass
 
@@ -691,8 +688,9 @@ def update_index(idx, chunk=None, add=True):
     # debugpy.debug_this_thread()
     global key_index
     global lock
-    in_index = False
+    global fragmentation
 
+    in_index = False
     
     if idx in key_index:
         in_index = True
@@ -707,13 +705,10 @@ def update_index(idx, chunk=None, add=True):
         try:
             if in_index and key_index[idx] - key_index[idx] <= 0:
                 if free_blocks[hash_table[idx].chunk].get(hash_table[idx].size) is not None:
-                    free_blocks[hash_table[idx].chunk].get(hash_table[idx].size).append(hash_table[idx].offset)
-                    key_index['free_size'] = key_index['free_size'] + hash_table[idx].size
-                    key_index['free_count'] = key_index['free_count'] + 1
+                    free_blocks[hash_table[idx].chunk].get(hash_table[idx].size).append(hash_table[idx].offset)                    
                 else:
-                    free_blocks[hash_table[idx].chunk].insert(hash_table[idx].size, [hash_table[idx].offset])
-                    key_index['free_size'] = key_index['free_size'] + hash_table[idx].size
-                    key_index['free_count'] = key_index['free_count'] + 1
+                    free_blocks[hash_table[idx].chunk].insert(hash_table[idx].size, [hash_table[idx].offset])                    
+                    
                 GC.remove_uses.append(idx)
                 hash_table[idx].DELETED = True
                 hash_table[idx].DELETION_TIME = time.time()
@@ -727,7 +722,7 @@ def update_index(idx, chunk=None, add=True):
                 key_index[idx] = key_index[idx] - 1
                 hash_table[idx].uses = hash_table[idx].uses - -1
         except Exception:
-            print(traceback.format_exc())
+            tqdm.tqdm.write(traceback.format_exc())
             raise IOError
 
     return True
@@ -754,9 +749,10 @@ def write_new_blocks(_queued_writes):
     writing = True    
     start_time = time.time()
 
-    write_bar.reset()    
-    write_bar.total = len(write_buffer)
-    write_bar.refresh()
+    if performance_measure_bars:
+        write_bar.reset()    
+        write_bar.total = len(write_buffer)
+        write_bar.refresh()
     while writing:
         try:            
             q = write_buffer.popleft()
@@ -796,6 +792,8 @@ def write_new_blocks(_queued_writes):
                                         q.block = fb.get(s).pop(0)
                                         if len(fb.get(s)) == 0:
                                             fb.pop(s)
+                                            fragmentation['free_size'] = fragmentation['free_size'] - s
+                                            fragmentation['free_count'] = fragmentation['free_count'] - 1
                                         # free_blocks[hash_table[remove].chunk][0].pop(hash_table[remove].offset)
                                         break
                                     except ValueError:
@@ -845,8 +843,9 @@ def write_new_blocks(_queued_writes):
                         registers_processed = registers_processed + 1
                         bytes_processed = bytes_processed + written
                         
-                        write_bar.update(1)
-                        # write_bar.refresh()
+                        if performance_measure_bars:
+                            write_bar.update(1)
+                            # write_bar.refresh()
                         try:
                             del write_read_cache[q.hash]
                         except KeyError:
@@ -866,7 +865,10 @@ def write_new_blocks(_queued_writes):
             pass            
     write_buffer_lock = False
     if registers_processed > 0:
-        write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+        if performance_measure_bars:
+            write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+        else:
+            pass
         # pass
         # print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
         # print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")    
@@ -884,7 +886,7 @@ def dedup(data):
 
     blk_list = []
     queued_writes = []
-    
+
     start_time = time.time()
     bytes_processed = 0
     if type(data) == bytearray or type(data) == bytes:
@@ -892,9 +894,10 @@ def dedup(data):
             data = bytearray(data)
         
         ch = variable_chunks(data)        
-        # dedup_bar.reset()
-        dedup_bar.total = len(ch) + dedup_bar.total
-        dedup_bar.refresh()
+        if performance_measure_bars:
+            # dedup_bar.reset()
+            dedup_bar.total = len(ch) + dedup_bar.total
+            dedup_bar.refresh()
         for c in ch:
             # read_cache[c.hash] = c.data
             blk_list.append(0)
@@ -923,14 +926,18 @@ def dedup(data):
                     blk_list[q.idx] = FileBlock(q.hash, len(c.data))
                     write_read_cache[c.hash] = c.data
                     write_buffer.append(q)            
-            dedup_bar.update(1)
             bytes_processed = bytes_processed + len(c.data)
-            # dedup_bar.refresh()
+
+            if performance_measure_bars:
+                dedup_bar.update(1)                
+                # dedup_bar.refresh()
     else:
         print("Value Error when preparing writes")
         print(traceback.format_exc())
         raise ValueError
-    dedup_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+    
+    if performance_measure_bars:
+        dedup_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
     return blk_list
 
 
@@ -944,7 +951,10 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
     data = bytearray()
 
     cached = False    
-    r = bytearray()
+    r = bytearray()   
+    
+    start_time = time.time()
+    bytes_processed = 0
 
     for idx, b in enumerate(blklst):
         if idx < start_block:
@@ -1007,10 +1017,7 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
                             decompresed_data = d
 
                         read_cache[_hash] = decompresed_data
-
-                    # if _hash != hash_data(decompresed_data):
-                    #     print('Critical data failure')
-                        # decompresed_data = d
+                    
                     d = decompresed_data
 
                 else:
@@ -1020,9 +1027,9 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
 
             if b.hash != hash_data(d):
                 print('Critical data failure')
-            if d is not None:
+            if d is not None:                
                 data += d
-
+                bytes_processed = bytes_processed + len(d)                
     return data
 
 
@@ -1047,15 +1054,6 @@ def chunks(lst, n):
 
 def variable_chunks(data):
     return hashed_chunks(data)
-
-class NoUniqueValueError(Exception):
-    def __str__(self):
-        return 'Query generated more than 1 result row'
-
-
-class NoSuchRowError(Exception):
-    def __str__(self):
-        return 'Query produced 0 result rows'
 
 '''
 
@@ -1094,7 +1092,7 @@ def parse_args():
 
 async def parent():        
     print("parent: started!")    
-    async with trio.open_nursery() as nursery:
+    async with trio.open_nursery() as nursery:        
         print("parent: PyFuse Main...")
         nursery.start_soon(pyfuse3.main)
 
@@ -1104,56 +1102,47 @@ async def parent():
         print("parent: Usage...")
         nursery.start_soon(usage)
 
-        print("parent: waiting for children to finish...")
-        os.system('clear')
-        # -- we exit the nursery block here --
+        if performance_measure_bars:
+            print("parent: waiting for children to finish...")
+            os.system('clear')
+
+            # -- we exit the nursery block here --
     print("parent: all done!")
 
 
 async def persist():
     last_time = time.time()
-    while True:
-        if time.time() - last_time > gc_interval and not write_buffer_lock:
+    while True:        
+        if (time.time() - last_time > gc_interval or len(write_buffer) > write_buffer_size) and not write_buffer_lock:
             # print('======================')
             # print("DEBUG: Starting Write")
             if len(write_buffer) > 0:
                 write_new_blocks(write_buffer)
-                garbage_collector()
-                persist_data([inodes, contents])
+            garbage_collector()
+            persist_data([inodes, contents])
             last_time = time.time()
             # print('======================')
         await trio.sleep(1)
 
 
 async def usage():
-    last_time = time.time()
-    while True:
-        if time.time() - last_time > gc_interval:
-            # print('======================')
-            # print("DEBUG: Usage")
+    last_time = time.time()    
+    while True:        
+        if (time.time() - last_time > usage_interval):  
             get_usage()
-            # print('======================')
-            memory_bar_active.reset()
-            memory_bar_active.n = unix_memory() //1024//1024
-            memory_bar_active.refresh()
+            if performance_measure_bars:
+                memory_bar_active.reset()
+                memory_bar_active.n = unix_memory() //1024//1024
+                memory_bar_active.refresh()                
+                memory_bar_inactive.reset()
+                memory_bar_inactive.n = resident() //1024//1024
+                memory_bar_inactive.refresh()                
+                memory_bar_statck.reset()
+                memory_bar_statck.n = stacksize() //1024//1024
+                memory_bar_statck.refresh()
             
-            memory_bar_inactive.reset()
-            memory_bar_inactive.n = resident() //1024//1024
-            memory_bar_inactive.refresh()
-            
-            memory_bar_statck.reset()
-            memory_bar_statck.n = stacksize() //1024//1024
-            memory_bar_statck.refresh()
-            # tqdm.tqdm.write("Memory Used: "+ humanbytes(unix_memory()))
-            # tqdm.tqdm.write("Memory Stack Size: "+ humanbytes(stacksize()))
-            # tqdm.tqdm.write("Resident Memory: "+ humanbytes(resident()))
-            # print("Memory Used: "+ humanbytes(unix_memory()))
-            # print("Resident Memory: "+humanbytes(resident()))
-            # print("Memory Stack Size: "+humanbytes(stacksize()))
-            # print('======================')
             last_time = time.time()
-        await trio.sleep(5)
-
+        await trio.sleep(1)
 
 '''
 
@@ -1179,9 +1168,13 @@ if __name__ == '__main__':
     pyfuse3.init(operations, options.mountpoint, fuse_options)
     
     try:
-        trio.run(parent)
+        trio.run(parent)    
     except:
-        pyfuse3.close(unmount=False)        
+        pyfuse3.close(unmount=False)
+        print("Persisting remaining data...")
+        if len(write_buffer) > 0 and not write_buffer_lock:
+            write_new_blocks(write_buffer)
+        persist_data([inodes, contents])
         raise
 
     pyfuse3.close()

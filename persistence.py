@@ -23,51 +23,31 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
     global GC
     global inodes
     global contents
+    global fragmentation
 
-    if _keys is None:
-        key_index_path = os.path.join(os.getcwd(), 'metadata', "key_index.vfs")
-    else:
-        key_index_path = _keys
-
+    print("Setting-up File System Metadata")
     if os.path.isfile(key_index_path):
         key_index = decompress_pickle(key_index_path)
 
-    if _GC is None:
-        gc_path = os.path.join(os.getcwd(), 'metadata', "gc.vfs")
-    else:
-        gc_path = _GC
-
     if os.path.isfile(gc_path):
         GC = decompress_pickle(gc_path)
-
-    if _hash is None:
-        hash_table_path = os.path.join(os.getcwd(), 'metadata', "hash_table.bin")
-    else:
-        hash_table_path = _hash
-
+    
     if os.path.isfile(hash_table_path):
         hash_table = decompress_pickle(hash_table_path)
 
-    if _free_blocks is None:
-        free_blocks_path = os.path.join(os.getcwd(), 'metadata', "free_blocks.bin")
-    else:
-        free_blocks_path = _free_blocks
-
     if os.path.isfile(free_blocks_path):
         free_blocks = decompress_pickle(free_blocks_path)
-
-    if _fs_meta is None:
-        fs_meta_path = os.path.join(os.getcwd(), 'metadata', "fs.meta")
-    else:
-        fs_meta_path = _fs_meta
+        print("Recalculating fragmentation:")
+        free_blocks_path = _free_blocks
+        
+        for fb in free_blocks:
+            if len(list(fb.keys())) > 0: 
+                for b in list(fb.keys()):
+                    fragmentation['free_size'] = fragmentation['free_size'] + (len(fb.get(b)) * b)
+            fragmentation['free_count'] = fragmentation['free_count'] + len(fb.get(b))
 
     if os.path.isfile(fs_meta_path):
         fs_meta = decompress_pickle(fs_meta_path)
-
-    if _datastore is None:
-        datastore_path = os.path.join(os.getcwd(), 'metadata')
-    else:
-        datastore_path = _datastore
 
     for chunk in datastore_chunks:
         chunk_path = os.path.join(os.getcwd(), 'metadata', 'chunk' + str(chunk) + '.ds.vfs')
@@ -89,7 +69,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
             ds.close()
 
             free_blocks.append(IOBTree.IOBTree())
-
+    print("File System Ready")
     return datastore, free_blocks, key_index, hash_table, fs_meta, GC
 
 
