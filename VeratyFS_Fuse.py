@@ -62,39 +62,8 @@ datastore, free_blocks, key_index, hash_table, fs_meta, GC = init_persistance()
 global_data = {'datastore':datastore, 'free_blocks':free_blocks, 'key_index':key_index, 'hash_table':hash_table, 'fs_meta': fs_meta, 'GC': GC}
 write_buffer_lock = False
 
-from psutil import virtual_memory
-mem = virtual_memory()
-
-bar_format_MB = "{desc:35}{percentage:3.0f}%|{bar:100}|  {n_fmt} / {total_fmt} MB {postfix}"
-bar_format_Blocks = "{desc:35}{percentage:3.0f}%|{bar:100}|  {n_fmt} / {total_fmt} Blocks {postfix}"
-bar_format_percent = "{desc:35}{percentage:3.0f}%|{bar:100}|  {n_fmt} / {total_fmt} % {postfix}"
-bar_format_block_with_rate = "{desc:35}{percentage:3.0f}%|{bar:100}|  {n_fmt} / {total_fmt} - {rate_fmt}{postfix}"
-
-space_bar_used = tqdm.tqdm(total=(partition_size_gb//1024//1024), leave=True, unit=' MB', colour='#5adc3d', mininterval=5, bar_format=bar_format_MB)
-space_bar_used.set_description("Used Space")
-space_bar_savings = tqdm.tqdm(total=(partition_size_gb//1024//1024), leave=True, unit=' MB', colour='#5adc3d', mininterval=5, bar_format=bar_format_MB)
-space_bar_savings.set_description("Saved Space with (Comp+Dedup)")
-space_bar_compression_rate = tqdm.tqdm(total=100, leave=True, unit=' %', colour='#5adc3d', mininterval=5, bar_format=bar_format_percent)
-space_bar_compression_rate.set_description("Compression Rate")
-space_bar_free_space = tqdm.tqdm(total=(partition_size_gb//1024//1024), leave=True, unit=' MB', colour='#5adc3d', mininterval=5, bar_format=bar_format_MB)
-space_bar_free_space.set_description("Free Space")
-
-frag_bar_space = tqdm.tqdm(total=(partition_size_gb//1024//1024), leave=True, unit=' MB', colour='#c70039', mininterval=5, bar_format=bar_format_MB)
-frag_bar_space.set_description("Fragmentation")
-frag_bar_blocks = tqdm.tqdm(total=partition_size_gb//allocation_unit, leave=True, unit=' Blocks', colour='#c70039', mininterval=5, bar_format=bar_format_Blocks)
-frag_bar_blocks.set_description("Fragmented Blocks (aprox.)")
-
-memory_bar_active = tqdm.tqdm(total=(mem.total//1024//1024), leave=True, unit=' MB', colour='cyan', mininterval=5, bar_format=bar_format_MB)
-memory_bar_active.set_description("Used memory - Active")
-memory_bar_inactive = tqdm.tqdm(total=(mem.total//1024//1024), leave=True, unit=' MB', colour='cyan', mininterval=5, bar_format=bar_format_MB)
-memory_bar_inactive.set_description('Used memory - Resident')
-memory_bar_statck = tqdm.tqdm(total=(mem.total//1024//1024), leave=True, unit=' MB', colour='cyan', mininterval=5, bar_format=bar_format_MB)
-memory_bar_statck.set_description("Used memory - Stack")
-
-write_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='blue',miniters=0, bar_format=bar_format_block_with_rate)
-write_bar.set_description("Disk writing (flush)")
-dedup_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='blue', miniters=0, bar_format=bar_format_block_with_rate)
-dedup_bar.set_description("Deduplicating data")
+from progress_bars import space_bar_compression_rate, space_bar_free_space, space_bar_savings, write_bar, dedup_bar, space_bar_over_used
+from progress_bars import space_bar_used, frag_bar_blocks, frag_bar_space, memory_bar_active, memory_bar_inactive, memory_bar_statck
 
 try:
     if global_data['fs_meta'][0] is not None:
@@ -614,8 +583,10 @@ def get_usage():
     if undeduped_compressed != 0 and undeduped_uncompressed != 0:
         compression_rate = undeduped_compressed/undeduped_uncompressed
 
+    
+
     space_bar_used.reset()
-    space_bar_used.n = deduped_compressed //1024//1024
+    space_bar_used.n = min((deduped_compressed //1024//1024), (partition_size_gb//1024//1024))
     space_bar_used.refresh()
 
     space_bar_savings.reset()
@@ -627,15 +598,19 @@ def get_usage():
         compbar = 0
 
     space_bar_compression_rate.reset()
-    space_bar_compression_rate.n = round(compbar*100, 3)
+    space_bar_compression_rate.n = max(0.0, round(compbar*100, 3))
     space_bar_compression_rate.refresh()
 
     space_bar_free_space.reset()
-    space_bar_free_space.n = (partition_size_gb - (fragmenation_size + deduped_compressed)) //1024//1024
+    space_bar_free_space.n = max(0,(partition_size_gb - (fragmenation_size + deduped_compressed)) //1024//1024)
     space_bar_free_space.refresh()
 
+    space_bar_over_used.reset()
+    space_bar_over_used.n = max(0, (deduped_compressed //1024//1024) - (partition_size_gb//1024//1024))
+    space_bar_over_used.refresh()
+
     frag_bar_space.reset()
-    frag_bar_space.n = fragmentation['free_size'] //1024//1024
+    frag_bar_space.n = max(0, fragmentation['free_size'] //1024//1024)
     frag_bar_space.refresh()
 
     frag_bar_blocks.reset()
@@ -891,7 +866,8 @@ def write_new_blocks(_queued_writes):
             pass            
     write_buffer_lock = False
     if registers_processed > 0:
-        pass
+        write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+        # pass
         # print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
         # print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")    
 
@@ -909,6 +885,8 @@ def dedup(data):
     blk_list = []
     queued_writes = []
     
+    start_time = time.time()
+    bytes_processed = 0
     if type(data) == bytearray or type(data) == bytes:
         if type(data) == bytes:
             data = bytearray(data)
@@ -946,12 +924,13 @@ def dedup(data):
                     write_read_cache[c.hash] = c.data
                     write_buffer.append(q)            
             dedup_bar.update(1)
+            bytes_processed = bytes_processed + len(c.data)
             # dedup_bar.refresh()
     else:
         print("Value Error when preparing writes")
         print(traceback.format_exc())
         raise ValueError
-
+    dedup_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
     return blk_list
 
 
