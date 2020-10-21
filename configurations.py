@@ -14,6 +14,9 @@ datastore = []
 key_index = {}
 hash_table = {}
 fs_meta = None
+fragmentation = {}
+fragmentation['free_size'] = 0
+fragmentation['free_count'] = 0
 
 # Blocks = []
 # NEXT_BLOCK_OFFSET = []

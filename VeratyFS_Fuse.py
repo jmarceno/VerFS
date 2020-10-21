@@ -65,25 +65,35 @@ write_buffer_lock = False
 from psutil import virtual_memory
 mem = virtual_memory()
 
-space_bar_used = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=5,)
+bar_format_MB = "{desc:35}{percentage:3.0f}%|{bar:100}|  {n_fmt} / {total_fmt} MB {postfix}"
+bar_format_Blocks = "{desc:35}{percentage:3.0f}%|{bar:100}|  {n_fmt} / {total_fmt} Blocks {postfix}"
+bar_format_percent = "{desc:35}{percentage:3.0f}%|{bar:100}|  {n_fmt} / {total_fmt} % {postfix}"
+bar_format_block_with_rate = "{desc:35}{percentage:3.0f}%|{bar:100}|  {n_fmt} / {total_fmt} - {rate_fmt}{postfix}"
+
+space_bar_used = tqdm.tqdm(total=(partition_size_gb//1024//1024), leave=True, unit=' MB', colour='#5adc3d', mininterval=5, bar_format=bar_format_MB)
 space_bar_used.set_description("Used Space")
-space_bar_savings = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=5)
-space_bar_savings.set_description("Saved Space with (Comp+Dedup):")
-space_bar_compression_rate = tqdm.tqdm(total=1, leave=True, unit=' %', colour='green', mininterval=5)
+space_bar_savings = tqdm.tqdm(total=(partition_size_gb//1024//1024), leave=True, unit=' MB', colour='#5adc3d', mininterval=5, bar_format=bar_format_MB)
+space_bar_savings.set_description("Saved Space with (Comp+Dedup)")
+space_bar_compression_rate = tqdm.tqdm(total=100, leave=True, unit=' %', colour='#5adc3d', mininterval=5, bar_format=bar_format_percent)
 space_bar_compression_rate.set_description("Compression Rate")
-space_bar_free_space = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=5)
+space_bar_free_space = tqdm.tqdm(total=(partition_size_gb//1024//1024), leave=True, unit=' MB', colour='#5adc3d', mininterval=5, bar_format=bar_format_MB)
 space_bar_free_space.set_description("Free Space")
 
-memory_bar_active = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=5)
+frag_bar_space = tqdm.tqdm(total=(partition_size_gb//1024//1024), leave=True, unit=' MB', colour='#c70039', mininterval=5, bar_format=bar_format_MB)
+frag_bar_space.set_description("Fragmentation")
+frag_bar_blocks = tqdm.tqdm(total=partition_size_gb//allocation_unit, leave=True, unit=' Blocks', colour='#c70039', mininterval=5, bar_format=bar_format_Blocks)
+frag_bar_blocks.set_description("Fragmented Blocks (aprox.)")
+
+memory_bar_active = tqdm.tqdm(total=(mem.total//1024//1024), leave=True, unit=' MB', colour='cyan', mininterval=5, bar_format=bar_format_MB)
 memory_bar_active.set_description("Used memory - Active")
-memory_bar_inactive = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=5)
+memory_bar_inactive = tqdm.tqdm(total=(mem.total//1024//1024), leave=True, unit=' MB', colour='cyan', mininterval=5, bar_format=bar_format_MB)
 memory_bar_inactive.set_description('Used memory - Resident')
-memory_bar_statck = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=5)
+memory_bar_statck = tqdm.tqdm(total=(mem.total//1024//1024), leave=True, unit=' MB', colour='cyan', mininterval=5, bar_format=bar_format_MB)
 memory_bar_statck.set_description("Used memory - Stack")
 
-write_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='red',miniters=0)
+write_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='blue',miniters=0, bar_format=bar_format_block_with_rate)
 write_bar.set_description("Disk writing (flush)")
-dedup_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='magenta', miniters=0)
+dedup_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='blue', miniters=0, bar_format=bar_format_block_with_rate)
 dedup_bar.set_description("Deduplicating data")
 
 try:
@@ -382,9 +392,9 @@ class Operations(pyfuse3.Operations):
         size = 0
         for k in list(self.inodes.keys()):
             size = size + self.inodes[k].size
-        stat_.f_blocks = partition_size_gb // stat_.f_frsize    
+        stat_.f_blocks = max(0, (partition_size_gb // stat_.f_frsize))
         # stat_.f_blocks = size // stat_.f_frsize
-        stat_.f_bfree = (partition_size_gb - get_usage()[2]) // allocation_unit #stat_.f_blocks - (size // allocation_unit)
+        stat_.f_bfree = max(0, (partition_size_gb - get_usage()[2]) // allocation_unit )#stat_.f_blocks - (size // allocation_unit)
         # stat_.f_bfree = max(size // stat_.f_frsize, 1024) #TODO: WHAT IS THIS SHIT?
         stat_.f_bavail = stat_.f_bfree
 
@@ -591,15 +601,25 @@ def get_usage():
         except KeyError:
             continue
 
+        try:
+            undeduped_compressed = undeduped_compressed - fragmentation['free_size']
+            deduped_compressed = undeduped_compressed - fragmentation['free_size']
+        except:
+            pass
+
+    fragmenation_size = fragmentation['free_size']
+    fragmenation_quant = fragmentation['free_count']
+
+    
     if undeduped_compressed != 0 and undeduped_uncompressed != 0:
         compression_rate = undeduped_compressed/undeduped_uncompressed
 
     space_bar_used.reset()
-    space_bar_used.n = deduped_compressed
+    space_bar_used.n = deduped_compressed //1024//1024
     space_bar_used.refresh()
 
     space_bar_savings.reset()
-    space_bar_savings.n = (undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed - deduped_compressed)
+    space_bar_savings.n = ((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed - deduped_compressed))//1024//1024
     space_bar_savings.refresh()
 
     compbar = (1 - compression_rate)
@@ -607,12 +627,21 @@ def get_usage():
         compbar = 0
 
     space_bar_compression_rate.reset()
-    space_bar_compression_rate.n = (1 - compression_rate)
+    space_bar_compression_rate.n = round(compbar*100, 3)
     space_bar_compression_rate.refresh()
 
     space_bar_free_space.reset()
-    space_bar_free_space.n = partition_size_gb - deduped_compressed
+    space_bar_free_space.n = (partition_size_gb - (fragmenation_size + deduped_compressed)) //1024//1024
     space_bar_free_space.refresh()
+
+    frag_bar_space.reset()
+    frag_bar_space.n = fragmentation['free_size'] //1024//1024
+    frag_bar_space.refresh()
+
+    frag_bar_blocks.reset()
+    frag_bar_blocks.n = fragmentation['free_count'] 
+    frag_bar_blocks.refresh()
+    
     # print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
     # print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
     # print("Deduped (Compression) Space Used : " + humanbytes(deduped_compressed) + " [Duplicated data found (Saved Space): " + humanbytes(undeduped_uncompressed -deduped_compressed) + " ]")
@@ -650,8 +679,21 @@ def garbage_collector():
                 hash_table[remove].DELETED = True
                 try:
                     free_blocks[hash_table[remove].chunk].get(hash_table[remove].size).append(hash_table[remove].offset)
+                    key_index['free_size'] = key_index['free_size'] + hash_table[remove].size
+                    key_index['free_count'] = key_index['free_count'] + 1
                 except AttributeError:
                     free_blocks[hash_table[remove].chunk].insert(hash_table[remove].size, [hash_table[remove].offset])
+                    key_index['free_size'] = hash_table[remove].size
+                    key_index['free_count'] =1
+
+                try:
+                    key_index['free_size'] = key_index['free_size'] + hash_table[remove].size
+                    key_index['free_count'] = key_index['free_count'] + 1
+                except:
+                    key_index['free_size'] = hash_table[remove].size
+                    key_index['free_count'] =1
+
+
                 
     except IndexError:
         pass
@@ -691,8 +733,12 @@ def update_index(idx, chunk=None, add=True):
             if in_index and key_index[idx] - key_index[idx] <= 0:
                 if free_blocks[hash_table[idx].chunk].get(hash_table[idx].size) is not None:
                     free_blocks[hash_table[idx].chunk].get(hash_table[idx].size).append(hash_table[idx].offset)
+                    key_index['free_size'] = key_index['free_size'] + hash_table[idx].size
+                    key_index['free_count'] = key_index['free_count'] + 1
                 else:
                     free_blocks[hash_table[idx].chunk].insert(hash_table[idx].size, [hash_table[idx].offset])
+                    key_index['free_size'] = key_index['free_size'] + hash_table[idx].size
+                    key_index['free_count'] = key_index['free_count'] + 1
                 GC.remove_uses.append(idx)
                 hash_table[idx].DELETED = True
                 hash_table[idx].DELETION_TIME = time.time()
@@ -839,19 +885,10 @@ def write_new_blocks(_queued_writes):
                 except Exception:
                     print(traceback.format_exc())                
         except IndexError:
-            # if registers_processed > 0:
-            #     print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
-            #     print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")                
-                # persist_data(fs_meta)                
             writing = False
             write_buffer_lock = False                
         finally:
-            pass
-            # write_bar.set_postfix(Speed=humanbytes(bytes_processed/(time.time()-start_time))+ "/s" , refresh=False)
-            # write_bar.update(1)
-            # write_bar.refresh()
-            # pbar.update(1)
-            # break
+            pass            
     write_buffer_lock = False
     if registers_processed > 0:
         pass
@@ -1118,15 +1155,15 @@ async def usage():
             get_usage()
             # print('======================')
             memory_bar_active.reset()
-            memory_bar_active.n = unix_memory()
+            memory_bar_active.n = unix_memory() //1024//1024
             memory_bar_active.refresh()
             
             memory_bar_inactive.reset()
-            memory_bar_inactive.n = resident()
+            memory_bar_inactive.n = resident() //1024//1024
             memory_bar_inactive.refresh()
             
             memory_bar_statck.reset()
-            memory_bar_statck.n = stacksize()
+            memory_bar_statck.n = stacksize() //1024//1024
             memory_bar_statck.refresh()
             # tqdm.tqdm.write("Memory Used: "+ humanbytes(unix_memory()))
             # tqdm.tqdm.write("Memory Stack Size: "+ humanbytes(stacksize()))
