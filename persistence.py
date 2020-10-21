@@ -5,6 +5,7 @@ from configurations import *
 from datastructures import DataStore
 import mmap
 import copy
+import platform
 
 def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _free_blocks=None, _partition_size=None, _GC=None):
     # debugpy.debug_this_thread()
@@ -62,8 +63,6 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
 
     if os.path.isfile(fs_meta_path):
         fs_meta = decompress_pickle(fs_meta_path)
-        # inodes = fs_meta[0]
-        # contents = fs_meta[1]
 
     if _datastore is None:
         datastore_path = os.path.join(os.getcwd(), 'metadata')
@@ -78,7 +77,8 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
             datastore.append(DataStore(chunk, chunk_size, chunk_path))
         else:
             f = open(os.path.join(os.getcwd(), 'metadata', 'chunk'+str(chunk)+'.ds.vfs'), "wb")
-            # f.write(b'\x00\x00\x00\x00\x00')
+            if "win" in str(platform.platform()):
+                f.write(b'\x00\x00\x00\x00\x00')
             f.truncate(chunk_size)
             f.flush()
             f.close()
@@ -90,10 +90,10 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
 
             free_blocks.append(IOBTree.IOBTree())
 
-    return datastore, free_blocks, key_index, hash_table, fs_meta
+    return datastore, free_blocks, key_index, hash_table, fs_meta, GC
 
 
-def persist_data(fs=None):
+async def persist_data(fs=None):
     # debugpy.debug_this_thread()
     global key_index
     global datastore

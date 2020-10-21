@@ -31,7 +31,8 @@ write_buffer = deque()  # queue.Queue()
 write_buffer_size = 3000
 write_buffer_lifetime = 15
 write_buffer_lock = False
-gc_interval = 60  # Intervalo entre o final de uma operação de GC e o inicio de outra
+gc_interval = 1  # Intervalo entre o final de uma operação de GC e o inicio de outra
+
 
 under_fetch_limit = 2
 over_fetch_limit = 6  # 64 blocks of 16k = 1MB

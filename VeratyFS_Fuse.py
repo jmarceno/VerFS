@@ -54,17 +54,48 @@ from configurations import *
 from persistence import init_persistance, persist_data
 from stats import unix_memory, resident, stacksize
 
+# from tqdm.asyncio import trange, tqdm
+import tqdm
 
-datastore, free_blocks, key_index, hash_table, fs_meta = init_persistance()
+datastore, free_blocks, key_index, hash_table, fs_meta, GC = init_persistance()
 
-global_data = {'datastore':datastore, 'free_blocks':free_blocks, 'key_index':key_index, 'hash_table':hash_table, 'fs_meta': fs_meta}
+global_data = {'datastore':datastore, 'free_blocks':free_blocks, 'key_index':key_index, 'hash_table':hash_table, 'fs_meta': fs_meta, 'GC': GC}
+write_buffer_lock = False
 
-if global_data['fs_meta'][0] is not None:
-    inodes = global_data['fs_meta'][0]
-    contents = global_data['fs_meta'][1]
-else:
-    inodes = inodes
-    contents = contents
+from psutil import virtual_memory
+mem = virtual_memory()
+
+space_bar_used = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=2)
+space_bar_used.set_description("Used Space: ")
+space_bar_savings = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=2)
+space_bar_savings.set_description("Saved Space with (Comp+Dedup) :")
+space_bar_compression_rate = tqdm.tqdm(total=1, leave=True, unit=' %', colour='green', mininterval=2)
+space_bar_compression_rate.set_description("Compression Rate")
+space_bar_free_space = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=2)
+space_bar_free_space.set_description("Free Space: ")
+
+memory_bar_active = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=2)
+memory_bar_active.set_description("Used memory - Active: ")
+memory_bar_inactive = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=2)
+memory_bar_inactive.set_description('Used memory - Resident: ')
+memory_bar_statck = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=2)
+memory_bar_statck.set_description("Used memory - Stack: ")
+
+write_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='yellow', mininterval=2)
+write_bar.set_description("Disk writing (flush):")
+# dedup_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='yellow', mininterval=2)
+# dedup_bar.set_description("Deduplicating data: ")
+
+try:
+    if global_data['fs_meta'][0] is not None:
+        inodes = global_data['fs_meta'][0]
+        contents = global_data['fs_meta'][1]
+    else:
+        inodes = inodes
+        contents = contents
+except:
+        inodes = inodes
+        contents = contents
 
 try:
     import faulthandler
@@ -95,11 +126,19 @@ class Operations(pyfuse3.Operations):
         super(Operations, self).__init__()
         
         self.inode_open_count = defaultdict(int)
-        if inodes is None or contents is None:            
+        try:
+            if global_data['fs_meta'] is not None and global_data['fs_meta'][0] is None or global_data['fs_meta'][1] is None:
+                self.inodes = inodes
+                self.contents = contents
+                self.init_file_system()
+            else:
+                self.inodes = global_data['fs_meta'][0]
+                self.contents = global_data['fs_meta'][1]
+        except TypeError:
+            self.inodes = inodes
+            self.contents = contents
             self.init_file_system()
-        else:
-            self.inodes = global_data['fs_meta'][0]
-            self.contents = global_data['fs_meta'][1]
+            
 
 
     def init_file_system(self):
@@ -119,17 +158,23 @@ class Operations(pyfuse3.Operations):
         root_dir.name = b'..'
         root_dir.parent_inode = pyfuse3.ROOT_INODE
         root_dir.inode = pyfuse3.ROOT_INODE
-        self.contents[root_dir.name] = root_dir
+        self.contents[pyfuse3.ROOT_INODE] = root_dir
 
 
     async def lookup(self, inode_p, name, ctx=None):
+        inode = None
         if name == '.':
             inode = inode_p
         elif name == '..':
-            inode = self.contents[name]
+            inode = self.contents[inode_p]
+        elif str(b'.Trash') in str(name):
+            raise(pyfuse3.FUSEError(errno.ENOENT))
         else:
-            try:                
-                inode = self.contents[name].inode                
+            try:
+                for i in self.contents:
+                    if self.contents[i].parent_inode ==  inode_p and self.contents[i].name == name:
+                        inode = self.contents[i].inode
+                        break                        
             except TypeError:                
                 raise(pyfuse3.FUSEError(errno.ENOENT))
             except AttributeError:
@@ -170,7 +215,7 @@ class Operations(pyfuse3.Operations):
 
 
     async def readlink(self, inode, ctx):
-        return self.inodes.get(inode).target        
+        return self.inodes[inode].target        
 
     async def opendir(self, inode, ctx):
         return inode
@@ -203,12 +248,13 @@ class Operations(pyfuse3.Operations):
         self._remove(inode_p, name, entry)
 
     def _remove(self, inode_p, name, entry):
-        if self.contents[entry.st_ino].inode != inode_p and self.contents[entry.st_ino].parent_inode == inode_p and self.contents[entry.st_ino].name != name:
+        if self.contents[inode_p].inode != inode_p and self.contents[inode_p].parent_inode == inode_p and self.contents[inode_p].name != name:
             raise pyfuse3.FUSEError(errno.ENOTEMPTY)
         
         for e in list(self.contents.keys()): #TODO: LENTO MUDAR
             if self.contents[e].name == name and self.contents[e].parent_inode == inode_p:
-                removed = self.contents.pop(e)                
+                self.contents.pop(e)
+                break
 
         if entry.st_nlink == 1 and entry.st_ino not in self.inode_open_count:
             removed = self.inodes.pop(entry.st_ino)
@@ -241,10 +287,11 @@ class Operations(pyfuse3.Operations):
             self._replace(inode_p_old, name_old, inode_p_new, name_new,
                           entry_old, entry_new)
         else:
-            old = self.contents[inode_p_old.name]
+            old = self.contents[inode_p_old]
             old.name = name_new
             old.parent_inode = inode_p_new
-            self.inodes[inode_p_old.inode] = old
+            self.contents[inode_p_old] = old
+            # self.inodes[inode_p_old] = old
 
 
     def _replace(self, inode_p_old, name_old, inode_p_new, name_new,
@@ -254,22 +301,19 @@ class Operations(pyfuse3.Operations):
             if self.contents[c].inode != inode_p_old and self.contents[c].parent_inode == inode_p_old and self.contents[c].name != name_old and str('.trashinfo.') not in str(name_new) and str('.trashinfo.') not in str(name_old):
                 raise pyfuse3.FUSEError(errno.ENOTEMPTY)
         
-        # if self.count_parent_entries(entry_new.st_ino) > 0:        
-        #     raise pyfuse3.FUSEError(errno.ENOTEMPTY)
-
-        old = self.contents.pop(name_old)
+        old = self.contents.pop(inode_p_old)
         new_d = Directory_Inode(self.contents)
         new_d.name = old.name
         new_d.inode = entry_old.st_ino
         new_d.parent_inode = old.parent_inode
-        self.contents[new_d.name] = new_d
+        self.contents[new_d.inode] = new_d
 
-        if entry_new.st_nlink == 1 and entry_new.st_ino not in self.inode_open_count:
-            for i in list(self.inodes.keys()):
-                if self.inodes.get(i).id == entry_new.st_ino:
-                    removed = self.inodes.pop(i)
-                    for b in removed.data:
-                        update_index(b.hash, chunk=None, add=False)
+        # if entry_new.st_nlink == 1 and entry_new.st_ino not in self.inode_open_count:
+        #     for i in list(self.inodes.keys()):
+        #         if self.inodes.get(i).id == entry_new.st_ino:
+        #             removed = self.inodes.pop(i)
+        #             for b in removed.data:
+        #                 update_index(b.hash, chunk=None, add=False)
 
 
     async def link(self, inode, new_inode_p, new_name, ctx):
@@ -282,7 +326,7 @@ class Operations(pyfuse3.Operations):
         d.name = new_name
         d.inode = inode
         d.parent_inode = new_inode_p
-        self.contents[inode.name] = d
+        self.contents[inode] = d
 
         return await self.getattr(inode)
 
@@ -392,7 +436,7 @@ class Operations(pyfuse3.Operations):
         d.name = name
         d.parent_inode = inode_p
 
-        self.contents[name] = d
+        self.contents[inode] = d
         
         return await self.getattr(inode)
 
@@ -504,85 +548,12 @@ class Operations(pyfuse3.Operations):
                 self.inodes.pop(fh)
 
 
-class NoUniqueValueError(Exception):
-    def __str__(self):
-        return 'Query generated more than 1 result row'
+'''
 
+VERATYFS OPERATIONS AND NON OS DEPENDENT CODE
+DEDUP, COMPRESSION, WRITE, DELETE, INDEXES MAINTAINANCE
 
-class NoSuchRowError(Exception):
-    def __str__(self):
-        return 'Query produced 0 result rows'
-
-def init_logging(debug=False):
-    formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(threadName)s: '
-                                  '[%(name)s] %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    root_logger = logging.getLogger()
-    if debug:
-        handler.setLevel(logging.DEBUG)
-        root_logger.setLevel(logging.DEBUG)
-    else:
-        handler.setLevel(logging.INFO)
-        root_logger.setLevel(logging.INFO)
-    root_logger.addHandler(handler)
-
-def parse_args():
-    '''Parse command line'''
-
-    parser = ArgumentParser()
-
-    parser.add_argument('mountpoint', type=str,
-                        help='Where to mount the file system')
-    parser.add_argument('--debug', action='store_true', default=False,
-                        help='Enable debugging output')
-    parser.add_argument('--debug-fuse', action='store_true', default=False,
-                        help='Enable FUSE debugging output')
-
-    return parser.parse_args()
-
-
-async def parent():
-    print("parent: started!")
-    async with trio.open_nursery() as nursery:
-        print("parent: PyFuse Main...")
-        nursery.start_soon(pyfuse3.main)
-
-        print("parent: Persist...")
-        nursery.start_soon(persist)
-
-        print("parent: Usage...")
-        nursery.start_soon(usage)
-
-        print("parent: waiting for children to finish...")
-        # -- we exit the nursery block here --
-    print("parent: all done!")
-
-
-async def persist():
-    last_time = time.time()
-    while True:
-        if time.time() - last_time > gc_interval:
-            print("DEBUG: Staring Write")
-            write_new_blocks(write_buffer)
-            garbage_collector()
-            persist_data([inodes, contents])
-            last_time = time.time()
-        await trio.sleep(5)
-
-
-async def usage():
-    last_time = time.time()
-    while True:
-        if time.time() - last_time > gc_interval:
-            print("DEBUG: Usage")
-            get_usage()
-            print("Memory Used: "+ humanbytes(unix_memory()))
-            print("Resident Memory: "+humanbytes(resident()))
-            print("Memory Stack Size: "+humanbytes(stacksize()))
-            last_time = time.time()
-        await trio.sleep(5)
-    
+'''
 
 def get_small_blocks_real_size(start_path = '.'):
     total_size = 0
@@ -623,18 +594,37 @@ def get_usage():
     if undeduped_compressed != 0 and undeduped_uncompressed != 0:
         compression_rate = undeduped_compressed/undeduped_uncompressed
 
-    print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
-    print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
-    print("Deduped (Compression) Space Used : " + humanbytes(deduped_compressed) + " [Duplicated data found (Saved Space): " + humanbytes(undeduped_uncompressed -deduped_compressed) + " ]")
-    print("Compression Rate : " + str(1 - compression_rate) + "% Saved Space: " + humanbytes(undeduped_uncompressed - undeduped_compressed))
-    print("Total Savings: " + humanbytes((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)))
+    space_bar_used.reset()
+    space_bar_used.n = undeduped_uncompressed
+    space_bar_used.refresh()
+
+    space_bar_savings.reset()
+    space_bar_savings.n = (undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed - deduped_compressed)
+    space_bar_savings.refresh()
+
+    compbar = (1 - compression_rate)
+    if compbar == 1:
+        compbar = 0
+
+    space_bar_compression_rate.reset()
+    space_bar_compression_rate.n = (1 - compression_rate)
+    space_bar_compression_rate.refresh()
+        
+    space_bar_savings.reset()
+    space_bar_savings.n = partition_size-deduped_compressed
+    space_bar_free_space.refresh()
+    # print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
+    # print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
+    # print("Deduped (Compression) Space Used : " + humanbytes(deduped_compressed) + " [Duplicated data found (Saved Space): " + humanbytes(undeduped_uncompressed -deduped_compressed) + " ]")
+    # print("Compression Rate : " + str(1 - compression_rate) + "% Saved Space: " + humanbytes(undeduped_uncompressed - undeduped_compressed))
+    # print("Total Savings: " + humanbytes((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)))
 
     del key_index_copy
 
     return undeduped_uncompressed, undeduped_compressed, deduped_compressed, (undeduped_compressed-deduped_compressed), compression_rate
 
 
-def garbage_collector():
+async def garbage_collector():
     # debugpy.debug_this_thread()
     global free_blocks
     global hash_table
@@ -699,7 +689,10 @@ def update_index(idx, chunk=None, add=True):
     else:
         try:
             if in_index and key_index[idx] - key_index[idx] <= 0:
-                free_blocks[chunk].append(hash_table[idx])
+                if free_blocks[hash_table[idx].chunk].get(hash_table[idx].size) is not None:
+                    free_blocks[hash_table[idx].chunk].get(hash_table[idx].size).append(hash_table[idx].offset)
+                else:
+                    free_blocks[hash_table[idx].chunk].insert(hash_table[idx].size, [hash_table[idx].offset])
                 GC.remove_uses.append(idx)
                 hash_table[idx].DELETED = True
                 hash_table[idx].DELETION_TIME = time.time()
@@ -719,7 +712,7 @@ def update_index(idx, chunk=None, add=True):
     return True
 
 
-def write_new_blocks(_queued_writes):
+async def write_new_blocks(_queued_writes):
     """
     Writes a series of blocks that where quede
 
@@ -733,22 +726,22 @@ def write_new_blocks(_queued_writes):
     global write_buffer_lock
     global hash_table
     global fs_meta
-
+    
+    write_buffer_lock = True
     registers_processed = 0
     bytes_processed = 0
-    writing = True
+    writing = True    
     start_time = time.time()
 
-    write_buffer_lock = True
+    write_bar.reset()
+    write_bar.total = len(write_buffer)
     while writing:
-
-        try:
+        try:            
             q = write_buffer.popleft()
             if not q.result:
                 try:
                     written = 0
                     written_hash = ""
-
                     if len(q.compressed_data) <= small_block_limit:
                         if q.compressed:
                             written = len(q.compressed_data)
@@ -800,6 +793,7 @@ def write_new_blocks(_queued_writes):
                                     else:
                                         written = mm.write(q.data)
                                         written_hash = hash_data(q.data)
+                                    # mm.flush()
                         except ValueError:
                             print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
                             print(traceback.format_exc())
@@ -827,7 +821,12 @@ def write_new_blocks(_queued_writes):
                         update_index(q.hash, q.chunk, True)
 
                         registers_processed = registers_processed + 1
-                        bytes_processed = bytes_processed + written
+                        bytes_processed = bytes_processed + written                            
+                        
+                        # write_bar.set_postfix(Speed=humanbytes(bytes_processed/(time.time()-start_time))+ "/s" , refresh=False)
+                        write_bar.update(1)
+                        write_bar.refresh()
+
                         try:
                             del write_read_cache[q.hash]
                         except KeyError:
@@ -839,19 +838,23 @@ def write_new_blocks(_queued_writes):
                         raise IOError
 
                 except Exception:
-                    print(traceback.format_exc())
-
+                    print(traceback.format_exc())                
         except IndexError:
-            if registers_processed > 0:
-                print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
-                print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")
-                print("TODO: IMPLEMENT METADATA PERSISTANCE")
-                # persist_data(fs_meta)
+            # if registers_processed > 0:
+            #     print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
+            #     print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")                
+                # persist_data(fs_meta)                
             writing = False
-            write_buffer_lock = False
-            break
+            write_buffer_lock = False                
+        finally:
+            pass
+            # pbar.update(1)
+            # break
     write_buffer_lock = False
-    # return _queued_writes
+    if registers_processed > 0:
+        pass
+        # print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
+        # print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")    
 
 
 def dedup(data):
@@ -866,12 +869,14 @@ def dedup(data):
 
     blk_list = []
     queued_writes = []
-
+    
     if type(data) == bytearray or type(data) == bytes:
         if type(data) == bytes:
             data = bytearray(data)
-
-        ch = variable_chunks(data)
+        
+        ch = variable_chunks(data)        
+        # dedup_bar.reset()
+        # dedup_bar.total = len(ch)        
         for c in ch:
             # read_cache[c.hash] = c.data
             blk_list.append(0)
@@ -899,8 +904,9 @@ def dedup(data):
                     q = QueuedWrite(len(blk_list)-1, c.hash, c.data)
                     blk_list[q.idx] = FileBlock(q.hash, len(c.data))
                     write_read_cache[c.hash] = c.data
-                    write_buffer.append(q)
-
+                    write_buffer.append(q)            
+            # dedup_bar.update(1)
+            # dedup_bar.refresh()
     else:
         print("Value Error when preparing writes")
         print(traceback.format_exc())
@@ -1023,7 +1029,118 @@ def chunks(lst, n):
 def variable_chunks(data):
     return hashed_chunks(data)
 
+class NoUniqueValueError(Exception):
+    def __str__(self):
+        return 'Query generated more than 1 result row'
 
+
+class NoSuchRowError(Exception):
+    def __str__(self):
+        return 'Query produced 0 result rows'
+
+'''
+
+CODE INITIALIZATION AND RUN
+
+'''
+
+def init_logging(debug=False):
+    formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(threadName)s: '
+                                  '[%(name)s] %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    root_logger = logging.getLogger()
+    if debug:
+        handler.setLevel(logging.DEBUG)
+        root_logger.setLevel(logging.DEBUG)
+    else:
+        handler.setLevel(logging.INFO)
+        root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
+
+def parse_args():
+    '''Parse command line'''
+
+    parser = ArgumentParser()
+
+    parser.add_argument('mountpoint', type=str,
+                        help='Where to mount the file system')
+    parser.add_argument('--debug', action='store_true', default=False,
+                        help='Enable debugging output')
+    parser.add_argument('--debug-fuse', action='store_true', default=False,
+                        help='Enable FUSE debugging output')
+
+    return parser.parse_args()
+
+
+async def parent():        
+    print("parent: started!")    
+    async with trio.open_nursery() as nursery:
+        print("parent: PyFuse Main...")
+        nursery.start_soon(pyfuse3.main)
+
+        print("parent: Persist...")
+        nursery.start_soon(persist)
+
+        print("parent: Usage...")
+        nursery.start_soon(usage)
+
+        print("parent: waiting for children to finish...")
+        os.system('clear')
+        # -- we exit the nursery block here --
+    print("parent: all done!")
+
+
+async def persist():
+    last_time = time.time()
+    while True:
+        if time.time() - last_time > gc_interval and not write_buffer_lock:
+            # print('======================')
+            # print("DEBUG: Starting Write")
+            if len(write_buffer) > 0:
+                await write_new_blocks(write_buffer)
+                await garbage_collector()
+                await persist_data([inodes, contents])
+            last_time = time.time()
+            # print('======================')
+        await trio.sleep(5)
+
+
+async def usage():
+    last_time = time.time()
+    while True:
+        if time.time() - last_time > gc_interval:
+            # print('======================')
+            # print("DEBUG: Usage")
+            get_usage()
+            # print('======================')
+            memory_bar_active.reset()
+            memory_bar_active.n = unix_memory()
+            memory_bar_active.refresh()
+            
+            memory_bar_inactive.reset()
+            memory_bar_inactive.n = resident()
+            memory_bar_inactive.refresh()
+            
+            memory_bar_statck.reset()
+            memory_bar_statck.n = stacksize()
+            memory_bar_statck.refresh()
+            # tqdm.tqdm.write("Memory Used: "+ humanbytes(unix_memory()))
+            # tqdm.tqdm.write("Memory Stack Size: "+ humanbytes(stacksize()))
+            # tqdm.tqdm.write("Resident Memory: "+ humanbytes(resident()))
+            # print("Memory Used: "+ humanbytes(unix_memory()))
+            # print("Resident Memory: "+humanbytes(resident()))
+            # print("Memory Stack Size: "+humanbytes(stacksize()))
+            # print('======================')
+            last_time = time.time()
+        await trio.sleep(60)
+
+
+'''
+
+MAIN PROGRAM
+
+'''
 
 if __name__ == '__main__':    
     options = parse_args()
