@@ -93,7 +93,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
     return datastore, free_blocks, key_index, hash_table, fs_meta, GC
 
 
-async def persist_data(fs=None):
+def persist_data(fs=None):
     # debugpy.debug_this_thread()
     global key_index
     global datastore
@@ -125,6 +125,3 @@ async def persist_data(fs=None):
         print("DEBUG: Persistence File System Meta Info Deferred.")
 
     return True
-
-
-

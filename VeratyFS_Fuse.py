@@ -65,26 +65,28 @@ write_buffer_lock = False
 from psutil import virtual_memory
 mem = virtual_memory()
 
-space_bar_used = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=2)
-space_bar_used.set_description("Used Space: ")
-space_bar_savings = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=2)
-space_bar_savings.set_description("Saved Space with (Comp+Dedup) :")
-space_bar_compression_rate = tqdm.tqdm(total=1, leave=True, unit=' %', colour='green', mininterval=2)
+format_ =  '{l_bar}{bar}{r_bar}'], where l_bar='{desc}: {percentage:3.0f}%|' and r_bar='| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, ' '{rate_fmt}{postfix}]
+
+space_bar_used = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=5,)
+space_bar_used.set_description("Used Space")
+space_bar_savings = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=5)
+space_bar_savings.set_description("Saved Space with (Comp+Dedup):")
+space_bar_compression_rate = tqdm.tqdm(total=1, leave=True, unit=' %', colour='green', mininterval=5)
 space_bar_compression_rate.set_description("Compression Rate")
-space_bar_free_space = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=2)
-space_bar_free_space.set_description("Free Space: ")
+space_bar_free_space = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=5)
+space_bar_free_space.set_description("Free Space")
 
-memory_bar_active = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=2)
-memory_bar_active.set_description("Used memory - Active: ")
-memory_bar_inactive = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=2)
-memory_bar_inactive.set_description('Used memory - Resident: ')
-memory_bar_statck = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=2)
-memory_bar_statck.set_description("Used memory - Stack: ")
+memory_bar_active = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=5)
+memory_bar_active.set_description("Used memory - Active")
+memory_bar_inactive = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=5)
+memory_bar_inactive.set_description('Used memory - Resident')
+memory_bar_statck = tqdm.tqdm(total=mem.total, leave=True, unit=' Bytes', colour='cyan', mininterval=5)
+memory_bar_statck.set_description("Used memory - Stack")
 
-write_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='yellow', mininterval=2)
-write_bar.set_description("Disk writing (flush):")
-# dedup_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='yellow', mininterval=2)
-# dedup_bar.set_description("Deduplicating data: ")
+write_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='red',miniters=0)
+write_bar.set_description("Disk writing (flush)")
+dedup_bar = tqdm.tqdm(total=1, leave=True, unit=' Blocks', colour='magenta', miniters=0)
+dedup_bar.set_description("Deduplicating data")
 
 try:
     if global_data['fs_meta'][0] is not None:
@@ -595,7 +597,7 @@ def get_usage():
         compression_rate = undeduped_compressed/undeduped_uncompressed
 
     space_bar_used.reset()
-    space_bar_used.n = undeduped_uncompressed
+    space_bar_used.n = deduped_compressed
     space_bar_used.refresh()
 
     space_bar_savings.reset()
@@ -609,9 +611,9 @@ def get_usage():
     space_bar_compression_rate.reset()
     space_bar_compression_rate.n = (1 - compression_rate)
     space_bar_compression_rate.refresh()
-        
-    space_bar_savings.reset()
-    space_bar_savings.n = partition_size-deduped_compressed
+
+    space_bar_free_space.reset()
+    space_bar_free_space.n = partition_size_gb - deduped_compressed
     space_bar_free_space.refresh()
     # print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
     # print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
@@ -624,7 +626,7 @@ def get_usage():
     return undeduped_uncompressed, undeduped_compressed, deduped_compressed, (undeduped_compressed-deduped_compressed), compression_rate
 
 
-async def garbage_collector():
+def garbage_collector():
     # debugpy.debug_this_thread()
     global free_blocks
     global hash_table
@@ -712,7 +714,7 @@ def update_index(idx, chunk=None, add=True):
     return True
 
 
-async def write_new_blocks(_queued_writes):
+def write_new_blocks(_queued_writes):
     """
     Writes a series of blocks that where quede
 
@@ -733,8 +735,9 @@ async def write_new_blocks(_queued_writes):
     writing = True    
     start_time = time.time()
 
-    write_bar.reset()
+    write_bar.reset()    
     write_bar.total = len(write_buffer)
+    write_bar.refresh()
     while writing:
         try:            
             q = write_buffer.popleft()
@@ -821,12 +824,10 @@ async def write_new_blocks(_queued_writes):
                         update_index(q.hash, q.chunk, True)
 
                         registers_processed = registers_processed + 1
-                        bytes_processed = bytes_processed + written                            
+                        bytes_processed = bytes_processed + written
                         
-                        # write_bar.set_postfix(Speed=humanbytes(bytes_processed/(time.time()-start_time))+ "/s" , refresh=False)
                         write_bar.update(1)
-                        write_bar.refresh()
-
+                        # write_bar.refresh()
                         try:
                             del write_read_cache[q.hash]
                         except KeyError:
@@ -848,6 +849,9 @@ async def write_new_blocks(_queued_writes):
             write_buffer_lock = False                
         finally:
             pass
+            # write_bar.set_postfix(Speed=humanbytes(bytes_processed/(time.time()-start_time))+ "/s" , refresh=False)
+            # write_bar.update(1)
+            # write_bar.refresh()
             # pbar.update(1)
             # break
     write_buffer_lock = False
@@ -876,7 +880,8 @@ def dedup(data):
         
         ch = variable_chunks(data)        
         # dedup_bar.reset()
-        # dedup_bar.total = len(ch)        
+        dedup_bar.total = len(ch) + dedup_bar.total
+        dedup_bar.refresh()
         for c in ch:
             # read_cache[c.hash] = c.data
             blk_list.append(0)
@@ -905,7 +910,7 @@ def dedup(data):
                     blk_list[q.idx] = FileBlock(q.hash, len(c.data))
                     write_read_cache[c.hash] = c.data
                     write_buffer.append(q)            
-            # dedup_bar.update(1)
+            dedup_bar.update(1)
             # dedup_bar.refresh()
     else:
         print("Value Error when preparing writes")
@@ -1098,12 +1103,12 @@ async def persist():
             # print('======================')
             # print("DEBUG: Starting Write")
             if len(write_buffer) > 0:
-                await write_new_blocks(write_buffer)
-                await garbage_collector()
-                await persist_data([inodes, contents])
+                write_new_blocks(write_buffer)
+                garbage_collector()
+                persist_data([inodes, contents])
             last_time = time.time()
             # print('======================')
-        await trio.sleep(5)
+        await trio.sleep(1)
 
 
 async def usage():
@@ -1133,7 +1138,7 @@ async def usage():
             # print("Memory Stack Size: "+humanbytes(stacksize()))
             # print('======================')
             last_time = time.time()
-        await trio.sleep(60)
+        await trio.sleep(5)
 
 
 '''
