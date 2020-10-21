@@ -65,8 +65,6 @@ write_buffer_lock = False
 from psutil import virtual_memory
 mem = virtual_memory()
 
-format_ =  '{l_bar}{bar}{r_bar}'], where l_bar='{desc}: {percentage:3.0f}%|' and r_bar='| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, ' '{rate_fmt}{postfix}]
-
 space_bar_used = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=5,)
 space_bar_used.set_description("Used Space")
 space_bar_savings = tqdm.tqdm(total=partition_size_gb, leave=True, unit=' Bytes', colour='green', mininterval=5)
