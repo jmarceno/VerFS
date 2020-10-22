@@ -17,6 +17,7 @@ VeratyFS File System
 # debugpy.debug_this_thread()
 import os
 import sys
+import multiprocessing as mp
 
 # If we are running from the pyfuse3 source directory, try
 # to load the module from there first.

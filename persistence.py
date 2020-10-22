@@ -9,16 +9,13 @@ import platform
 
 def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _free_blocks=None, _partition_size=None, _GC=None):
     # debugpy.debug_this_thread()
+    from configurations import free_blocks_path, key_index_path, datastore_base_path, hash_table_path, gc_path, fs_meta_path
+        
     global key_index
     global datastore
     global hash_table
     global free_blocks
     global fs_meta
-    global key_index_path
-    global fs_meta_path
-    global datastore_path
-    global hash_table_path
-    global free_blocks_path
     global gc_path
     global GC
     global inodes
@@ -44,7 +41,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
             if len(list(fb.keys())) > 0: 
                 for b in list(fb.keys()):
                     fragmentation['free_size'] = fragmentation['free_size'] + (len(fb.get(b)) * b)
-            fragmentation['free_count'] = fragmentation['free_count'] + len(fb.get(b))
+                    fragmentation['free_count'] = fragmentation['free_count'] + len(fb.get(b))
 
     if os.path.isfile(fs_meta_path):
         fs_meta = decompress_pickle(fs_meta_path)
