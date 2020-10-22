@@ -49,19 +49,20 @@ small_block_read_cache =LRU(maxlen=small_block_cache_size)
 header_size = 2
 block_address_size = 5
 
-min_blk_size = 1024*32
-mean_blk_size = 1024*64
-max_blk_size = 1024*128
+allocation_unit = 1024
+min_blk_size = allocation_unit*32
+mean_blk_size = allocation_unit*64
+max_blk_size = allocation_unit*128
 small_block_limit = min_blk_size // 2    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
 partition_size = 80  # Partion size in GB
 partition_size_gb = partition_size * 1073741824
 ds_size = partition_size * 1073741824
-allocation_unit = 1024
 read_allocation_unit = 1024*128
-chunk_size_per_GB = 2
+chunk_size_per_GB = 1
 chunk_size = int(ceil(chunk_size_per_GB * 1073741824))
 datastore_chunks_number = int(ceil(ds_size/chunk_size))  # DataStore chunks equal to one every GB of partition size
+max_write_threads = datastore_chunks_number # Sets the maximum number of writing threads to the number of chunks
 
 key_index_path = os.path.join(os.getcwd(), 'metadata', "key_index.vfs")
 fs_meta_path = os.path.join(os.getcwd(), 'metadata', "fs.meta")
