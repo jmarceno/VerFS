@@ -170,27 +170,30 @@ class Operations(pyfuse3.Operations):
 
     async def getattr(self, inode, ctx=None):        
 
-        f = self.inodes[inode]
+        try:
+            f = self.inodes[inode]
 
-        entry = pyfuse3.EntryAttributes()
-        entry.st_ino = inode
-        entry.generation = 0
-        entry.entry_timeout = 300
-        entry.attr_timeout = 300
-        entry.st_mode = f.mode
+            entry = pyfuse3.EntryAttributes()
+            entry.st_ino = inode
+            entry.generation = 0
+            entry.entry_timeout = 300
+            entry.attr_timeout = 300
+            entry.st_mode = f.mode
 
-        entry.st_nlink = 1 #await self.count_entries(inode) # #TODO O sistema vai suportar HARD-LINKS? Caso negativo, apenas retornar 2, funciona
+            entry.st_nlink = 1 #await self.count_entries(inode) # #TODO O sistema vai suportar HARD-LINKS? Caso negativo, apenas retornar 2, funciona
 
-        entry.st_uid = f.uid
-        entry.st_gid = f.gid
-        entry.st_rdev = f.rdev
-        entry.st_size = f.size
+            entry.st_uid = f.uid
+            entry.st_gid = f.gid
+            entry.st_rdev = f.rdev
+            entry.st_size = f.size
 
-        entry.st_blksize = allocation_unit
-        entry.st_blocks = 1
-        entry.st_atime_ns = f.atime_ns
-        entry.st_mtime_ns = f.mtime_ns
-        entry.st_ctime_ns = f.ctime_ns
+            entry.st_blksize = allocation_unit
+            entry.st_blocks = 1
+            entry.st_atime_ns = f.atime_ns
+            entry.st_mtime_ns = f.mtime_ns
+            entry.st_ctime_ns = f.ctime_ns
+        except KeyError:
+            raise (pyfuse3.FUSEError(errno.ENOENT))
 
         return entry
 
@@ -474,9 +477,9 @@ class Operations(pyfuse3.Operations):
                     break
 
             if start_blk == 0 and end_blk == 0:
-                return get_file_data(self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
+                return await get_file_data(self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
             else:
-                data = get_file_data(self.inodes[fh].data, start_blk, end_blk)
+                data = await get_file_data(self.inodes[fh].data, start_blk, end_blk)
 
                 if self.inodes[fh].size == end_offset:
                     data = data[-(end_offset-offset):]
@@ -513,7 +516,7 @@ class Operations(pyfuse3.Operations):
         if end_offset > f.size:
             f.size = end_offset #TODO: SETAR TAMANHO DO ARQUIVO DE FORMA CORRETA
 
-        f.data += dedup(bytes(buf))
+        f.data += await dedup(bytes(buf))
         
         self.inodes[fh].data = f.data
         self.inodes[fh].size = f.size
@@ -626,7 +629,7 @@ def get_usage():
     return undeduped_uncompressed, undeduped_compressed, deduped_compressed, (undeduped_compressed-deduped_compressed), compression_rate
 
 
-def garbage_collector():
+async def garbage_collector():
     # debugpy.debug_this_thread()
     global free_blocks
     global hash_table
@@ -729,7 +732,7 @@ def update_index(idx, chunk=None, add=True):
     return True
 
 
-def write_new_blocks(_queued_writes):
+def write_new_blocks(_queued_writes, wq, resq, swq):
     """
     Writes a series of blocks that where quede
 
@@ -741,20 +744,21 @@ def write_new_blocks(_queued_writes):
     global datastore
     global free_blocks
     global write_buffer_lock
-    global hash_table
-    global fs_meta
+    global hash_table    
     
     write_buffer_lock = True
     registers_processed = 0
     bytes_processed = 0
     writing = True    
     start_time = time.time()
-
-    if performance_measure_bars:
-        write_bar.reset()    
-        write_bar.total = len(write_buffer)
-        write_bar.refresh()
+    
     while writing:
+        
+        if performance_measure_bars and write_bar.n > write_bar.total:
+            write_bar.reset()
+            write_bar.total = write_bar.total + len(write_buffer)           
+            write_bar.refresh()
+
         try:            
             q = write_buffer.popleft()
             if not q.result:
@@ -764,13 +768,15 @@ def write_new_blocks(_queued_writes):
                     if len(q.compressed_data) <= small_block_limit:
                         if q.compressed:
                             written = len(q.compressed_data)
-                            write_small_block(q.hash, q.compressed_data)
+                            swq.put((q.hash, q.compressed_data))
+                            # write_small_block(q.hash, q.compressed_data)
                             written_hash = hash_data(q.compressed_data)
                             q.chunk = -1                            
                         else:
                             written = len(q.data)
+                            swq.put((q.hash, q.data))
                             write_small_block(q.hash, q.data)
-                            written_hash = hash_data(q.data)
+                            # written_hash = hash_data(q.data)
                             q.chunk = -1                        
                     else:
                         for idx, ds in enumerate(datastore):
@@ -804,27 +810,41 @@ def write_new_blocks(_queued_writes):
                                         else:
                                             continue                    
                         try:
-                            if os.path.isfile(datastore[q.chunk].path):     # TODO: Organize all the data in one single write
-                                with open(datastore[q.chunk].path, "r+b") as f:
-                                    mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
-                                    mm.seek(q.block)
-                                    if q.compressed:
-                                        written = mm.write(q.compressed_data)
-                                        written_hash = hash_data(q.compressed_data)
-                                    else:
-                                        written = mm.write(q.data)
-                                        written_hash = hash_data(q.data)
-                                    # mm.flush()
-                        except ValueError:
-                            print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
+                            wq.put((q, datastore))
+                        except:
+                            print('Error flushing info')
                             print(traceback.format_exc())
 
-                    if not q.compressed and written_hash != q.hash:
-                        print("Data corruption - Hash inconsistance")
+                        
+                        # try:
+                        #     if os.path.isfile(datastore[q.chunk].path):     # TODO: Organize all the data in one single write
+                        #         with open(datastore[q.chunk].path, "r+b") as f:
+                        #             mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
+                        #             mm.seek(q.block)
+                        #             if q.compressed:
+                        #                 written = mm.write(q.compressed_data)
+                        #                 written_hash = hash_data(q.compressed_data)
+                        #             else:
+                        #                 written = mm.write(q.data)
+                        #                 written_hash = hash_data(q.data)
+                        #             # mm.flush()
+                        # except ValueError:
+                        #     print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
+                        #     print(traceback.format_exc())
+                        # if not resq.empty():
+                        #     written, written_hash = resq.get_nowait()
+                        # else:
+                        
+                        
+                        # written, q = resq.get()
+                    written = len(q.compressed_data)
+                    
+                    # if not q.compressed and written_hash != q.hash:
+                    #     print("Data corruption - Hash inconsistance")
 
-                    if q.compressed and written_hash != hash_data(q.compressed_data):
-                        print("Data corruption - Hash inconsistance")
-
+                    # if q.compressed and written_hash != hash_data(q.compressed_data):
+                    #     print("Data corruption - Hash inconsistance")
+    
                     if len(q.compressed_data) == written or len(q.data) == written:
                         q.result = True
                         # update_hash_table(q.hash, q.block, q.chunk, 1)
@@ -845,7 +865,8 @@ def write_new_blocks(_queued_writes):
                         bytes_processed = bytes_processed + written
                         
                         if performance_measure_bars:
-                            write_bar.update(1)
+                            write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+                            write_bar.update(1)                            
                             # write_bar.refresh()
                         try:
                             del write_read_cache[q.hash]
@@ -875,7 +896,7 @@ def write_new_blocks(_queued_writes):
         # print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")    
 
 
-def dedup(data):
+async def dedup(data):
     # debugpy.debug_this_thread()
     global datastore
     global free_blocks    
@@ -942,7 +963,7 @@ def dedup(data):
     return blk_list
 
 
-def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset=0, check_integrity=False):
+async def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset=0, check_integrity=False):
     # debugpy.debug_this_thread()
     global datastore
     global allocation_unit
@@ -1091,13 +1112,14 @@ def parse_args():
     return parser.parse_args()
 
 
-async def parent():        
-    print("parent: started!")    
+async def parent():    
+
+    print("parent: started!")
     async with trio.open_nursery() as nursery:        
         print("parent: PyFuse Main...")
         nursery.start_soon(pyfuse3.main)
 
-        print("parent: Persist...")
+        print("parent: Persist...")        
         nursery.start_soon(persist)
 
         print("parent: Usage...")
@@ -1111,19 +1133,87 @@ async def parent():
     print("parent: all done!")
 
 
+def write_small_block_to_disk(swq):
+    while True:
+        try:
+            if not swq.empty():
+                d_hash, d_data = swq.get(False)
+                write_small_block(d_hash, d_data)
+        except:
+            continue
+
+
+def write_to_disk(wq, resq):
+    # bytes_total = 0
+    # total_time = 0
+    while True:
+        written = 0
+        written_hash = ""
+        
+        if not wq.empty():
+            # start = time.time()
+            q, datastore = wq.get(False)            
+            try:
+                if os.path.isfile(datastore[q.chunk].path): # TODO: Organize all the data in one single write
+                    with open(datastore[q.chunk].path, "r+b") as f:
+                        mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
+                        mm.seek(q.block)
+                        if q.compressed:                            
+                            written = mm.write(q.compressed_data)
+                            written_hash = hash_data(q.compressed_data)
+                        else:                            
+                            written = mm.write(q.data)
+                            written_hash = hash_data(q.data)
+                        
+                        if not q.compressed and written_hash != q.hash:
+                            print("Data corruption - Hash inconsistance")
+
+                        elif q.compressed and written_hash != hash_data(q.compressed_data):
+                            print("Data corruption - Hash inconsistance")                          
+
+            except ValueError:
+                print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
+                print(traceback.format_exc())
+            # finally:
+            #     pass
+            #     # resq.put((written, q), False)
+            #     # bytes_total = bytes_total + written
+            #     # total_time = total_time + (time.time() - start)
+            #     # print(str(time.time() - start) + " - " + humanbytes(bytes_total/total_time) + "MB/s - Q size" + str(wq.qsize()))
+
+            
 async def persist():
+
+    ctx = mp.get_context('spawn')    
+    
+    wq = ctx.Queue() # Fila de mensagens a serem escritas no disco
+    resq = ctx.Queue() # Fila com as respostas das mensagens escritas
+    swq = ctx.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno
+    wbp = ctx.Process(target=write_to_disk, args=(wq,resq, ))
+    wsmbp = ctx.Process(target=write_small_block_to_disk, args=(swq, ))
+    wbp.start()
+    wsmbp.start()
+    # print(parent_conn.recv())   # prints "[42, None, 'hello']"
+    # p.join()
+
     last_time = time.time()
     while True:        
         if (time.time() - last_time > gc_interval or len(write_buffer) > write_buffer_size) and not write_buffer_lock:
             # print('======================')
             # print("DEBUG: Starting Write")
-            if len(write_buffer) > 0:
-                write_new_blocks(write_buffer)
-            garbage_collector()
+            if len(write_buffer) > 0:                
+                await trio.to_thread.run_sync(write_new_blocks, write_buffer, wq, resq, swq)
+                # await write_new_blocks(write_buffer, wq, resq, swq)
+            await garbage_collector()
             persist_data([inodes, contents])
             last_time = time.time()
             # print('======================')
         await trio.sleep(1)
+
+    wsmbp.join()
+    wsmbp.close()
+    wbp.join()
+    wbp.close()
 
 
 async def usage():
@@ -1172,10 +1262,10 @@ if __name__ == '__main__':
         trio.run(parent)    
     except:
         pyfuse3.close(unmount=False)
-        print("Persisting remaining data...")
-        if len(write_buffer) > 0 and not write_buffer_lock:
-            write_new_blocks(write_buffer)
-        persist_data([inodes, contents])
+        print("TODO: REDO THAT FOR MP - Persisting remaining data...")
+        # if len(write_buffer) > 0 and not write_buffer_lock:
+        #     write_new_blocks(write_buffer)
+        # persist_data([inodes, contents])
         raise
 
     pyfuse3.close()

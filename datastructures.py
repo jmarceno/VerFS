@@ -124,7 +124,10 @@ def write_small_block(_hash, data):
     full_path = os.path.join(directory, _hash)
 
     if not os.path.exists(directory):
-        os.makedirs(directory)
+        try:
+            os.makedirs(directory)
+        except FileExistsError:
+            pass
     
     w = 0
     with open(full_path, "wb") as f:        
