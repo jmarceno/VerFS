@@ -53,7 +53,7 @@ allocation_unit = 1024
 min_blk_size = allocation_unit*32
 mean_blk_size = allocation_unit*64
 max_blk_size = allocation_unit*128
-small_block_limit = min_blk_size // 2    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
+small_block_limit = min_blk_size // 4    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
 partition_size = 80  # Partion size in GB
 partition_size_gb = partition_size * 1073741824

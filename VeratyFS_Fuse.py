@@ -428,6 +428,7 @@ class Operations(pyfuse3.Operations):
         
         return await self.getattr(inode)
 
+    
     async def read(self, fh, offset, length):
         # debugpy.debug_this_thread()
         f = None
@@ -476,11 +477,10 @@ class Operations(pyfuse3.Operations):
 
                     break
 
-            if start_blk == 0 and end_blk == 0:
-                data = await trio.to_thread.run_sync(get_file_data, self.inodes[fh].data, start_blk, end_blk + 1)
-                return data[offset:end_offset]
+            if start_blk == 0 and end_blk == 0:                
+                return get_file_data(self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
             else:
-                data = await trio.to_thread.run_sync(get_file_data, self.inodes[fh].data, start_blk, end_blk)
+                data = get_file_data(self.inodes[fh].data, start_blk, end_blk)
 
                 if self.inodes[fh].size == end_offset:
                     data = data[-(end_offset-offset):]
@@ -506,6 +506,7 @@ class Operations(pyfuse3.Operations):
 
         return data
 
+    
     async def write(self, fh, offset, buf):
         # debugpy.debug_this_thread()
         f = None
@@ -518,7 +519,7 @@ class Operations(pyfuse3.Operations):
         if end_offset > f.size:
             f.size = end_offset #TODO: SETAR TAMANHO DO ARQUIVO DE FORMA CORRETA
 
-        f.data += await dedup(bytes(buf))
+        f.data += dedup(bytes(buf))
         
         self.inodes[fh].data = f.data
         self.inodes[fh].size = f.size
@@ -746,7 +747,7 @@ def write_new_blocks(_queued_writes, wq, resq, swq):
     global write_buffer_lock
     global hash_table    
     
-    # write_buffer_lock = True
+    write_buffer_lock = True
     registers_processed = 0
     bytes_processed = 0
     writing = True    
@@ -833,7 +834,8 @@ def write_new_blocks(_queued_writes, wq, resq, swq):
                     try:
                         del write_read_cache[q.hash]
                     except KeyError:
-                        print('Read cache Key error, the following key is nor present at the write read cache:' + str(q.hash))
+                        continue
+                        # print('Read cache Key error, the following key is nor present at the write read cache:' + str(q.hash))
                     continue                    
 
                 except Exception:
@@ -842,7 +844,7 @@ def write_new_blocks(_queued_writes, wq, resq, swq):
             writing = False
             write_buffer_lock = False                
     
-    # write_buffer_lock = False
+    write_buffer_lock = False
 
     if registers_processed > 0:
         if performance_measure_bars:
@@ -854,7 +856,7 @@ def write_new_blocks(_queued_writes, wq, resq, swq):
         # print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")    
 
 
-async def dedup(data):
+def dedup(data):
     # debugpy.debug_this_thread()
     global datastore
     global free_blocks    
@@ -1072,7 +1074,8 @@ def parse_args():
 async def parent():    
 
     print("Starting main process coodenator...")
-    async with trio.open_nursery() as nursery:        
+    async with trio.open_nursery() as nursery:               
+
         print("Starting: PyFuse Main...")
         nursery.start_soon(pyfuse3.main)
 
@@ -1085,8 +1088,6 @@ async def parent():
         if performance_measure_bars:
             print("Cleaning Terminal for bars...")
             os.system('clear')
-
-
 
 def write_small_block_to_disk(swq):
     while True:
@@ -1141,9 +1142,10 @@ async def persist():
     wbp.start()
     wsmbp.start()
     
-    last_time = time.time()
-    while True:        
-        if (time.time() - last_time > gc_interval or len(write_buffer) > write_buffer_size):# and not write_buffer_lock:    
+    time.sleep(5)
+    last_time = time.time()    
+    while True:
+        if (time.time() - last_time > gc_interval or len(write_buffer) > write_buffer_size) and not write_buffer_lock:    
             if len(write_buffer) > 0:                
                 await trio.to_thread.run_sync(write_new_blocks, write_buffer, wq, resq, swq)                
             await trio.to_thread.run_sync(garbage_collector)
@@ -1158,6 +1160,8 @@ async def persist():
 
 
 async def usage():
+
+    time.sleep(5)
     last_time = time.time()    
     while True:        
         if (time.time() - last_time > usage_interval):  
@@ -1204,9 +1208,10 @@ if __name__ == '__main__':
     except:
         pyfuse3.close(unmount=False)
         print("TODO: REDO THAT FOR MP - Persisting remaining data...")
-        # if len(write_buffer) > 0 and not write_buffer_lock:
-        #     write_new_blocks(write_buffer)
-        # persist_data([inodes, contents])
-        raise
+        if len(write_buffer) > 0 and not write_buffer_lock:
+            pass
+        persist_data([inodes, contents])
+        os.system('clear')
+        print(traceback.format_exc())
 
     pyfuse3.close()
