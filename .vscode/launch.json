@@ -5,13 +5,13 @@
     "version": "0.2.0",
     "configurations": [                
         {
-            "name": "Python: Current File - Debug Verbose",
+            "name": "VeratyFS Debug",
             "type": "python",
             "request": "launch",
             "program": "VeratyFS_Fuse.py",
             "console": "integratedTerminal",
             "args": [                
-                "/home/jardel/Downloads/tmpfs"
+                "/home/jardel/fsteste"
             ]
         }
     ]

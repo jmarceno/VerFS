@@ -134,6 +134,6 @@ dmypy.json
 /metadata/
 /metadata/smbs
 
-/venv37
-/venv38
 /Binary Viewer/
+/benchmarks/
+/non_core_files

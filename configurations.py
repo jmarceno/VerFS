@@ -55,7 +55,7 @@ mean_blk_size = allocation_unit*64
 max_blk_size = allocation_unit*128
 small_block_limit = min_blk_size // 4    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
-partition_size = 80  # Partion size in GB
+partition_size = 1  # Partion size in GB
 partition_size_gb = partition_size * 1073741824
 ds_size = partition_size * 1073741824
 read_allocation_unit = 1024*128
