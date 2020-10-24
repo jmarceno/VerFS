@@ -47,13 +47,13 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
         fs_meta = decompress_pickle(fs_meta_path)
 
     for chunk in datastore_chunks:
-        chunk_path = os.path.join(os.getcwd(), 'metadata', 'chunk' + str(chunk) + '.ds.vfs')
+        chunk_path = os.path.join(datastore_base_path, 'chunk' + str(chunk) + '.ds.vfs')
 
         if os.path.isfile(chunk_path):
             print("Found existing File System. Re-mounting it. Chunk:" +str(chunk))
             datastore.append(DataStore(chunk, chunk_size, chunk_path))
         else:
-            f = open(os.path.join(os.getcwd(), 'metadata', 'chunk'+str(chunk)+'.ds.vfs'), "wb")
+            f = open(os.path.join(datastore_base_path, 'chunk'+str(chunk)+'.ds.vfs'), "wb")
             if "win" in str(platform.platform()):
                 f.write(b'\x00\x00\x00\x00\x00')
             f.truncate(chunk_size)
@@ -70,7 +70,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
     return datastore, free_blocks, key_index, hash_table, fs_meta, GC
 
 
-def persist_data(fs=None):
+def persist_data(fs=None, stat_msg_queue=None):
     # debugpy.debug_this_thread()
     global key_index
     global datastore
@@ -87,18 +87,18 @@ def persist_data(fs=None):
     global gc_path
     
     if not compressed_pickle(key_index_path, key_index.copy()):
-        print("DEBUG: Persistence of Key Index Deferred.")
+        stat_msg_queue.put("DEBUG: Persistence of Key Index Deferred.")
     
     if not compressed_pickle(hash_table_path, hash_table.copy()):
-        print("DEBUG: Persistence of Hash Table Deferred.")
+        stat_msg_queue.put("DEBUG: Persistence of Hash Table Deferred.")
     
     if not compressed_pickle(free_blocks_path, free_blocks.copy()):
-        print("DEBUG: Persistence of Free Blocks Deferred.")
+        stat_msg_queue.put("DEBUG: Persistence of Free Blocks Deferred.")
     
     if not compressed_pickle(gc_path, copy.copy(GC)):
-        print("DEBUG: Persistence of GC Deferred.")
+        stat_msg_queue.put("DEBUG: Persistence of GC Deferred.")
     
     if not compressed_pickle(fs_meta_path, fs):
-        print("DEBUG: Persistence File System Meta Info Deferred.")
+        stat_msg_queue.put("DEBUG: Persistence File System Meta Info Deferred.")
 
     return True

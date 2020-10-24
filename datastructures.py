@@ -117,7 +117,7 @@ class SmallBlock:
             self.compressed = True
 
 
-def write_small_block(_hash, data):
+def write_small_block(_hash, data, stat_msg_queue):
     # debugpy.debug_this_thread()
 
     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
@@ -136,7 +136,7 @@ def write_small_block(_hash, data):
     return w        
 
 
-def read_small_block(_hash):
+def read_small_block(_hash, stat_msg_queue):
     # debugpy.debug_this_thread()
     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
     full_path = os.path.join(directory, _hash)
@@ -145,7 +145,7 @@ def read_small_block(_hash):
         return small_block.read()
 
 
-def delete_small_block(_hash):
+def delete_small_block(_hash, stat_msg_queue):
     # debugpy.debug_this_thread()
     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
     full_path = os.path.join(directory, _hash)

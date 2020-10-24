@@ -16,13 +16,13 @@ lzma_filters = [
 
 zlib_compression_level = 6
 bz2_compression_level = 1
-lz4_compression_level = frame.COMPRESSIONLEVEL_MINHC
+lz4_compression_level = 1 # frame.COMPRESSIONLEVEL_MINHC
 
-compression_trigger = 0.9  # How much the data has to be compressed for it to be worth. Rates below that will cause the data to not be compressed
+compression_trigger = 0.8  # How much the data has to be compressed for it to be worth. Rates below that will cause the data to not be compressed
 
 
 # Pickle a file and then compress it into a file with extension
-def compressed_pickle(path, data, format=1):
+def compressed_pickle(path, data, format=1, stat_msg_queue=None):
     """
 
     :param path:
@@ -54,7 +54,7 @@ def compressed_pickle(path, data, format=1):
 
 
 # Load any compressed pickle file
-def decompress_pickle(file, format=1):
+def decompress_pickle(file, format=1, stat_msg_queue=None):
     """
 
     :param file:
@@ -75,7 +75,7 @@ def decompress_pickle(file, format=1):
             return cPickle.load(data)
 
 
-def compress_data(data, _format=1):
+def compress_data(data, _format=1, stat_msg_queue=None):
     """
 
     :param data:
@@ -101,7 +101,7 @@ def compress_data(data, _format=1):
         return bz2.compress(data, bz2_compression_level)
 
 
-def decompress_data(data, _format=1):
+def decompress_data(data, _format=1, stat_msg_queue=None):
     """
 
     :param data:
@@ -143,7 +143,7 @@ Data Compressors
 """
 
 
-def lzma_decompress(data):
+def lzma_decompress(data, stat_msg_queue=None):
     results = []
     while True:
         decomp = lzma.LZMADecompressor(0, None, None)
@@ -163,7 +163,7 @@ def lzma_decompress(data):
     return b"".join(results)
 
 
-def bz2_decompress(data):
+def bz2_decompress(data, stat_msg_queue):
     decompressor = bz2.BZ2Decompressor()
 
     results = bytearray()
