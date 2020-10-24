@@ -6,21 +6,23 @@
 
 import zmq
 import json
+import traceback
 
 def send_message(stat_msg_queue):
 
-    server = "tcp://localhost:5555"
+    server = 'tcp://localhost:5555'
     retries = 0        
     context = zmq.Context()
     socket = context.socket(zmq.REQ)
 
     while True:
-        msg = stat_msg_queue.get()
+        msg = stat_msg_queue.get()        
         if type(msg) != dict:
-            msg = "Wrong data type: message provided to client was not a dict"        
+            msg = 'Wrong data type: message provided to client was not a dict'            
         try:
             socket.connect(server)
             socket.send_json(msg)
-            resp = socket.recv_json()
+            resp = socket.recv_json()            
         except:
-            pass
+            print(traceback.format_exc())
+            continue

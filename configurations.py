@@ -36,7 +36,7 @@ write_buffer = deque()  # queue.Queue()
 write_buffer_size = 3000
 write_buffer_lifetime = 15
 write_buffer_lock = False
-gc_interval = 3  # Intervalo entre o final de uma operação de GC e o inicio de outra
+gc_interval = 20  # Intervalo entre o final de uma operação de GC e o inicio de outra
 usage_interval = 5 # Time in seconds to update the usage couters
 
 under_fetch_limit = 2
@@ -51,9 +51,9 @@ allocation_unit = 1024
 min_blk_size = allocation_unit*32
 mean_blk_size = allocation_unit*64
 max_blk_size = allocation_unit*128
-small_block_limit = min_blk_size // 4    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
+small_block_limit = min_blk_size // 8    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
-partition_size = 100  # Partion size in GB
+partition_size = 80  # Partion size in GB
 partition_size_gb = partition_size * 1073741824
 ds_size = partition_size * 1073741824
 read_allocation_unit = 1024*128
@@ -72,3 +72,5 @@ datastore_base_path = os.path.join(os.getcwd(), '..', '..', 'metadata')
 datastore_chunks = list(range(0, datastore_chunks_number))
 
 identity_string = b'VeratyFS@v0.0.1@InLineDedup,FixedStoreSize,GC,Compression,FixedBlockSize\n'
+
+q_random = 100 # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue

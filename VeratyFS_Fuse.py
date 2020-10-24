@@ -18,7 +18,7 @@ VeratyFS File System
 import os
 import sys
 import multiprocessing as mp
-
+import random
 # If we are running from the pyfuse3 source directory, try
 # to load the module from there first.
 basedir = os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), '..'))
@@ -49,6 +49,7 @@ from pyfuse3 import FUSEError
 from argparse import ArgumentParser
 import trio
 import traceback
+from psutil import virtual_memory
 
 from datastructures import *
 from configurations import *
@@ -102,13 +103,14 @@ class Operations(pyfuse3.Operations):
     '''
     global global_data
 
-    enable_writeback_cache = True    
-
+    enable_writeback_cache = True
+    
     def __init__(self, stat_msg_queue):
         super(Operations, self).__init__()
         
         self.inode_open_count = defaultdict(int)
         self.stat_msg_queue = stat_msg_queue
+        
         try:
             if global_data['fs_meta'] is not None and global_data['fs_meta'][0] is None or global_data['fs_meta'][1] is None:
                 self.inodes = inodes
@@ -442,9 +444,9 @@ class Operations(pyfuse3.Operations):
             data = b''
         
         else:        
-            if offset >= self.inodes[fh].size:
-                print("End of File")
-                raise IOError
+            # if offset >= self.inodes[fh].size:
+            #     print("End of File")
+            #     raise IOError
             end_offset = min(self.inodes[fh].size, offset + length)
 
             start_blk = 0
@@ -479,10 +481,10 @@ class Operations(pyfuse3.Operations):
 
                     break
 
-            if start_blk == 0 and end_blk == 0:                
-                return get_file_data(self.inodes[fh].data, start_blk, end_blk + 1, self.stat_msg_queue)[offset:end_offset]
+            if start_blk == 0 and end_blk == 0:        
+                return get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
             else:
-                data = get_file_data(self.inodes[fh].data, start_blk, end_blk, self.stat_msg_queue)
+                data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
 
                 if self.inodes[fh].size == end_offset:
                     data = data[-(end_offset-offset):]
@@ -624,15 +626,15 @@ def get_usage(stat_msg_queue):
         frag_bar_blocks.refresh()
 
     else:
-        
-        stat_msg_queue.put({"Undeduped (No Compression) Space Used":min((deduped_compressed), (partition_size_gb))})        
-        stat_msg_queue.put({"Free Space": (max(0,(partition_size_gb - (deduped_compressed))))})
-        stat_msg_queue.put({"Undeduped (Compression) Space Used":undeduped_compressed})
-        stat_msg_queue.put({"Deduped (Compression) Space Used":deduped_compressed})
-        stat_msg_queue.put({"Compression Rate":str(1 - compression_rate)})
-        stat_msg_queue.put({"Total Savings":(undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)})
-        stat_msg_queue.put({"Fragmentation":max(0, fragmentation['free_size'])})
-        stat_msg_queue.put({"Fragmented Blocks":fragmentation['free_count']})
+        stat_msg_queue.put({'STAT:TOTAL_SIZE':partition_size_gb})
+        stat_msg_queue.put({'STAT:Undeduped (No Compression) Space Used':undeduped_uncompressed})        
+        stat_msg_queue.put({'STAT:Free Space': (max(0,(partition_size_gb - (deduped_compressed))))})
+        stat_msg_queue.put({'STAT:Undeduped (Compression) Space Used':undeduped_compressed})
+        stat_msg_queue.put({'STAT:Deduped (Compression) Space Used':deduped_compressed})
+        stat_msg_queue.put({'STAT:Compression Rate':1 - compression_rate})
+        stat_msg_queue.put({'STAT:Total Savings':(undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)})
+        stat_msg_queue.put({'STAT:Fragmentation':max(0, fragmentation['free_size'])})
+        stat_msg_queue.put({'STAT:Fragmented Blocks':fragmentation['free_count']})
     
     # print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
     # print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
@@ -687,7 +689,8 @@ def garbage_collector(stat_msg_queue):
             if performance_measure_bars:
                 GC_bar.update(1)
             else:
-                stat_msg_queue.put({"GCProgress" : str((len(GC.add_uses) + len(GC.remove_uses)))})
+                if random.randrange(1,q_random) == 1:
+                    stat_msg_queue.put({'INFO:GCProgress' : str((len(GC.add_uses) + len(GC.remove_uses)))})
 
     except IndexError:
         pass
@@ -878,7 +881,8 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
         if performance_measure_bars:
             write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
         else:
-            stat_msg_queue.put({'WriteSpeed' : str(bytes_processed/(time.time()-start_time))})
+            if random.randrange(1,q_random) == 1:
+                stat_msg_queue.put({'INFO:WriteSpeed' : bytes_processed/(time.time()-start_time)})
             # print(humanbytes(bytes_processed/(time.time()-start_time))+" /s")
         # pass
         # print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
@@ -949,11 +953,12 @@ def dedup(data, stat_msg_queue):
     if performance_measure_bars:
         dedup_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
     else:
-        stat_msg_queue.put({'DedupSpeed' : humanbytes(bytes_processed/ (time.time()- start_time))})
+        if random.randrange(1,q_random) == 1:
+            stat_msg_queue.put({'INFO:DedupSpeed' : bytes_processed/ (time.time()- start_time)})
     return blk_list
 
 
-def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset=0, check_integrity=False, stat_message_queue=None):
+def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offset=0, end_offset=0):
     # debugpy.debug_this_thread()
     global datastore
     global allocation_unit
@@ -1042,7 +1047,8 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
             if d is not None:                
                 data += d
                 bytes_processed = bytes_processed + len(d)
-    stat_message_queue.put({'ReadSpeed' : str(bytes_processed/ (time.time()- start_time))})
+    if random.randrange(1,q_random) == 1:
+        stat_msg_queue.put({'INFO:ReadSpeed' : str(bytes_processed/ (time.time()- start_time))})
     return data
 
 
@@ -1107,19 +1113,18 @@ async def parent(stat_msg_queue):
 
     print("Starting main process coodenator...")
     async with trio.open_nursery() as nursery:
+        try:
+            print("Starting: PyFuse Main...")
+            nursery.start_soon(pyfuse3.main)
 
-        print("Starting: PyFuse Main...")
-        nursery.start_soon(pyfuse3.main)
+            print("Starting: Persist...")        
+            nursery.start_soon(persist, stat_msg_queue)
 
-        print("Starting: Persist...")        
-        nursery.start_soon(persist, stat_msg_queue)
-
-        print("Start: Usage...")
-        nursery.start_soon(usage, stat_msg_queue)
-
-        if performance_measure_bars:
-            print("Cleaning Terminal for bars...")
-            os.system('clear')
+            print("Start: Usage...")
+            nursery.start_soon(usage, stat_msg_queue)
+            
+        except:
+            print(traceback.format_exc())
 
 def write_small_block_to_disk(swq, stat_msg_queue):
     while True:
@@ -1184,7 +1189,7 @@ async def persist(stat_msg_queue):
             await trio.to_thread.run_sync(garbage_collector, stat_msg_queue)
             await trio.to_thread.run_sync(persist_data, [inodes, contents], stat_msg_queue)
             last_time = time.time()            
-        await trio.sleep(1)
+        await trio.sleep(15)
 
     wsmbp.join()
     wsmbp.close()
@@ -1194,14 +1199,17 @@ async def persist(stat_msg_queue):
 
 async def usage(stat_msg_queue):
 
+    mem = virtual_memory()
+
     time.sleep(1)
     last_time = time.time()    
     while True:        
         if (time.time() - last_time > usage_interval):  
             await trio.to_thread.run_sync(get_usage, stat_msg_queue)
-            stat_msg_queue.put({"Memory (active in use)": unix_memory()})
-            stat_msg_queue.put({"Memory (resident)": resident()})
-            stat_msg_queue.put({"Memory (stack size)": stacksize()})
+            stat_msg_queue.put({'INFO:TOTAL_MEMORY': mem})
+            stat_msg_queue.put({'INFO:Memory (active in use)': unix_memory()})
+            stat_msg_queue.put({'INFO:Memory (resident)': resident()})
+            stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
 
             if performance_measure_bars:
                 memory_bar_active.reset()

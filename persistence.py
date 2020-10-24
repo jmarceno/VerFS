@@ -34,7 +34,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
 
     if os.path.isfile(free_blocks_path):
         free_blocks = decompress_pickle(free_blocks_path)
-        print("Recalculating fragmentation:")
+        # print("Recalculating fragmentation:")
         free_blocks_path = _free_blocks
         
         for fb in free_blocks:
@@ -50,7 +50,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
         chunk_path = os.path.join(datastore_base_path, 'chunk' + str(chunk) + '.ds.vfs')
 
         if os.path.isfile(chunk_path):
-            print("Found existing File System. Re-mounting it. Chunk:" +str(chunk))
+            # print("Found existing File System. Re-mounting it. Chunk:" +str(chunk))
             datastore.append(DataStore(chunk, chunk_size, chunk_path))
         else:
             f = open(os.path.join(datastore_base_path, 'chunk'+str(chunk)+'.ds.vfs'), "wb")
