@@ -1153,14 +1153,14 @@ def write_to_disk(wq, resq, stat_msg_queue):
         if not wq.empty():            
             q, datastore = wq.get(False)
 
-            if last_chunk != q.chunk:
-                try:
-                    if mm is not None:
-                        mm.flush()
-                        mm.close()
-                        last_chunk = q.chunk
-                except:
-                    last_chunk=q.chunk
+            # if last_chunk != q.chunk:
+            #     try:
+            #         if mm is not None:
+            #             mm.flush()
+            #             mm.close()
+            #             last_chunk = q.chunk
+            #     except:
+            #         last_chunk=q.chunk
 
             try:
                 if os.path.isfile(datastore[q.chunk].path): # TODO: Organize all the data in one single write
@@ -1179,8 +1179,8 @@ def write_to_disk(wq, resq, stat_msg_queue):
 
                         elif q.compressed and written_hash != hash_data(q.compressed_data):
                             print("Data corruption - Hash inconsistance")
-                        # mm.flush()
-                        # mm.close()
+                        mm.flush()
+                        mm.close()
 
             except ValueError:
                 print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
