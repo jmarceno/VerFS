@@ -50,6 +50,7 @@ from argparse import ArgumentParser
 import trio
 import traceback
 from psutil import virtual_memory
+import gc
 
 from datastructures import *
 from configurations import *
@@ -62,7 +63,6 @@ import tqdm
 
 datastore, free_blocks, key_index, hash_table, fs_meta, GC = init_persistance()
 
-global_data = {'datastore':datastore, 'free_blocks':free_blocks, 'key_index':key_index, 'hash_table':hash_table, 'fs_meta': fs_meta, 'GC': GC}
 write_buffer_lock = False
 
 if performance_measure_bars:
@@ -70,9 +70,9 @@ if performance_measure_bars:
     from progress_bars import space_bar_used, frag_bar_blocks, frag_bar_space, memory_bar_active, memory_bar_inactive, memory_bar_statck, GC_bar
 
 try:
-    if global_data['fs_meta'][0] is not None:
-        inodes = global_data['fs_meta'][0]
-        contents = global_data['fs_meta'][1]
+    if fs_meta[0] is not None:
+        inodes = fs_meta[0]
+        contents = fs_meta[1]
     else:
         inodes = inodes
         contents = contents
@@ -100,9 +100,10 @@ class Operations(pyfuse3.Operations):
     * atime, mtime and ctime are not updated
     * generation numbers are not supported
     * lookup counts are not maintained
-    '''
-    global global_data
+    '''    
 
+    global fs_meta
+    
     enable_writeback_cache = True
     
     def __init__(self, stat_msg_queue):
@@ -111,14 +112,15 @@ class Operations(pyfuse3.Operations):
         self.inode_open_count = defaultdict(int)
         self.stat_msg_queue = stat_msg_queue
         
+        
         try:
-            if global_data['fs_meta'] is not None and global_data['fs_meta'][0] is None or global_data['fs_meta'][1] is None:
+            if fs_meta is not None and fs_meta[0] is None or fs_meta[1] is None:
                 self.inodes = inodes
                 self.contents = contents
                 self.init_file_system()
             else:
-                self.inodes = global_data['fs_meta'][0]
-                self.contents = global_data['fs_meta'][1]
+                self.inodes = fs_meta[0]
+                self.contents = fs_meta[1]
         except TypeError:
             self.inodes = inodes
             self.contents = contents
@@ -566,8 +568,7 @@ def get_usage(stat_msg_queue):
     TODO: RECONSIDERAR TROCAR O KEY-INDEX POR UTLIZAÇÃO DE INDICE COM QUANTIDADE NOS BLOCOS
     Return drive virtual (undeduped size) and physical (deduped_size) utilization
     :return: Undeduped Data Un-Compressed, Undeduped Data Compressed, Deduped Data Compressed, Deduped Data Removed, Compression rate
-    """
-    # debugpy.debug_this_thread()
+    """    
     global hash_table
     global key_index
 
@@ -585,6 +586,7 @@ def get_usage(stat_msg_queue):
                 deduped_compressed = deduped_compressed + hash_table[k].size
         except KeyError:
             continue
+    del key_index_copy
 
     fragmenation_size = fragmentation['free_size']
     fragmenation_quant = fragmentation['free_count']
@@ -642,13 +644,13 @@ def get_usage(stat_msg_queue):
     # print("Compression Rate : " + str(1 - compression_rate) + "% Saved Space: " + humanbytes(undeduped_uncompressed - undeduped_compressed))
     # print("Total Savings: " + humanbytes((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)))
 
-    del key_index_copy
+    
+    gc.collect()
 
     return undeduped_uncompressed, undeduped_compressed, deduped_compressed, (undeduped_compressed-deduped_compressed), compression_rate
 
 
-def garbage_collector(stat_msg_queue):
-    # debugpy.debug_this_thread()
+def garbage_collector(stat_msg_queue):    
     global free_blocks
     global hash_table
     global key_index
@@ -689,7 +691,7 @@ def garbage_collector(stat_msg_queue):
             if performance_measure_bars:
                 GC_bar.update(1)
             else:
-                if random.randrange(1,q_rand) == 1:
+                if random.randrange(1,q_random) == 1:
                     stat_msg_queue.put({'INFO:GCProgress' : str((len(GC.add_uses) + len(GC.remove_uses)))})
 
     except IndexError:
@@ -709,8 +711,7 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
     :param idx: Hash of the block as of in the hash_table
     :param add: Operation. Should the block usage count go up or down?
     :return:
-    """
-    # debugpy.debug_this_thread()
+    """    
     global key_index
     global free_blocks
 
@@ -757,8 +758,7 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
 
     :param _queued_writes: data to be written
     :return: Tuple with the result of the operation and position (block) that the data has been written to
-    """
-    # debugpy.debug_this_thread()
+    """    
     global chunk_size
     global datastore
     global free_blocks
@@ -889,12 +889,10 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
         # print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")    
 
 
-def dedup(data, stat_msg_queue):
-    # debugpy.debug_this_thread()
+def dedup(data, stat_msg_queue):    
     global datastore
     global free_blocks    
-    global hash_table
-    global lock
+    global hash_table    
     global read_cache
     global write_buffer
     global write_read_cache
@@ -958,8 +956,7 @@ def dedup(data, stat_msg_queue):
     return blk_list
 
 
-def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offset=0, end_offset=0):
-    # debugpy.debug_this_thread()
+def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offset=0, end_offset=0):    
     global datastore
     global allocation_unit
     global hash_table
@@ -975,8 +972,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
 
     for idx, b in enumerate(blklst):
         if idx < start_block:
-            continue
-            # at_start = at_start + 1
+            continue            
         elif idx > end_block:
             return data
 
@@ -1034,6 +1030,8 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                             decompresed_data = d
 
                         read_cache[_hash] = decompresed_data
+                        # mm.flush()
+                        # mm.close()
                     
                     d = decompresed_data
 
@@ -1049,6 +1047,14 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                 bytes_processed = bytes_processed + len(d)
     if random.randrange(1,q_random) == 1:
         stat_msg_queue.put({'INFO:ReadSpeed' : str(bytes_processed/ (time.time()- start_time))})
+    
+    try:
+        if mm is not None:
+            mm.flush()
+            mm.close()
+    except:
+        pass
+    
     return data
 
 
@@ -1126,6 +1132,7 @@ async def parent(stat_msg_queue):
         except:
             print(traceback.format_exc())
 
+
 def write_small_block_to_disk(swq, stat_msg_queue):
     while True:
         try:
@@ -1135,16 +1142,26 @@ def write_small_block_to_disk(swq, stat_msg_queue):
         except:
             continue
 
+
 def write_to_disk(wq, resq, stat_msg_queue):
     # bytes_total = 0
     # total_time = 0
     while True:
         written = 0
         written_hash = ""
-        
-        if not wq.empty():
-            # start = time.time()
-            q, datastore = wq.get(False)            
+        last_chunk = ""
+        if not wq.empty():            
+            q, datastore = wq.get(False)
+
+            if last_chunk != q.chunk:
+                try:
+                    if mm is not None:
+                        mm.flush()
+                        mm.close()
+                        last_chunk = q.chunk
+                except:
+                    last_chunk=q.chunk
+
             try:
                 if os.path.isfile(datastore[q.chunk].path): # TODO: Organize all the data in one single write
                     with open(datastore[q.chunk].path, "r+b") as f:
@@ -1161,7 +1178,9 @@ def write_to_disk(wq, resq, stat_msg_queue):
                             print("Data corruption - Hash inconsistance")
 
                         elif q.compressed and written_hash != hash_data(q.compressed_data):
-                            print("Data corruption - Hash inconsistance")                          
+                            print("Data corruption - Hash inconsistance")
+                        # mm.flush()
+                        # mm.close()
 
             except ValueError:
                 print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
@@ -1188,7 +1207,8 @@ async def persist(stat_msg_queue):
                 await trio.to_thread.run_sync(write_new_blocks, write_buffer, wq, resq, swq, stat_msg_queue)
             await trio.to_thread.run_sync(garbage_collector, stat_msg_queue)
             await trio.to_thread.run_sync(persist_data, [inodes, contents], stat_msg_queue)
-            last_time = time.time()            
+            last_time = time.time()
+            gc.collect()
         await trio.sleep(15)
 
     wsmbp.join()
@@ -1241,7 +1261,7 @@ if __name__ == '__main__':
     stat_sender.start()
 
     options = parse_args()
-    init_logging(options.debug)
+    # init_logging(options.debug)
     operations = Operations(stat_msg_queue)
 
     try:

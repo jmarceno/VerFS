@@ -39,10 +39,9 @@ write_buffer_lock = False
 gc_interval = 20  # Intervalo entre o final de uma operação de GC e o inicio de outra
 usage_interval = 5 # Time in seconds to update the usage couters
 
-under_fetch_limit = 2
 over_fetch_limit = 6  # 64 blocks of 16k = 1MB
 over_read_limit = 2097152*10  # Number of bytes that will be read at each interaction of the read loop. This is effectivily a cache
-cache_size = 100000  # Cache size in entries. Memory size is ~cache_size*allocation_unit
+cache_size = 10000  # Cache size in entries. Memory size is ~cache_size*allocation_unit
 read_cache = LRU(maxlen=cache_size)
 small_block_cache_size = 300000
 small_block_read_cache =LRU(maxlen=small_block_cache_size)
@@ -51,13 +50,13 @@ allocation_unit = 1024
 min_blk_size = allocation_unit*32
 mean_blk_size = allocation_unit*64
 max_blk_size = allocation_unit*128
-small_block_limit = min_blk_size // 8    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
+small_block_limit = min_blk_size // 4    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
 partition_size = 80  # Partion size in GB
 partition_size_gb = partition_size * 1073741824
 ds_size = partition_size * 1073741824
 read_allocation_unit = 1024*128
-chunk_size_per_GB = 1
+chunk_size_per_GB = 10
 chunk_size = int(ceil(chunk_size_per_GB * 1073741824))
 datastore_chunks_number = int(ceil(ds_size/chunk_size))  # DataStore chunks equal to one every GB of partition size
 max_write_threads = datastore_chunks_number # Sets the maximum number of writing threads to the number of chunks
