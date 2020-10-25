@@ -1,0 +1,12 @@
+[package]
+name = "mmap_rust"
+version = "0.1.0"
+edition = "2020"
+
+[lib]
+name = "mmap_rust"
+crate-type = ["cdylib"]
+
+[dependencies.pyo3]
+version = "0.12.3"
+features = ["extension-module"]

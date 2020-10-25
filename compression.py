@@ -9,6 +9,7 @@ import struct
 import traceback
 from copy import deepcopy
 import os
+from shutil import copyfile
 
 lzma_filters = [
     {"id": lzma.FILTER_DELTA, "dist": 5},
@@ -30,6 +31,15 @@ def compressed_pickle(path, data, format=4, stat_msg_queue=None):
     :param data:
     :param format: 1: Bzip2, 2:Zip, 3:Lzma, 4:No-Compression
     """
+
+    if os.path.isfile(path):       
+        try: 
+            copyfile(path, path+'.bak')
+        except:
+            print("Impossible to backup "+ str(path) + " before update. Defering copy. Please check permissions at the metadata directory.")
+            return False
+
+
     format = int(format)
     if format == 1:        
         if type(data) == dict:

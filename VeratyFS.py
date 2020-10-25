@@ -1,172 +1,556 @@
-import debugpy
-debugpy.debug_this_thread()
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+'''
+VeratyFS File System
+- Version 0.0.5
+- Variable Block Size
+- Inline Dedup at Block Level
+- Transparent InLine Compression - Fast compression algorithim which only compress data above a certain threshold
+- 
+- Planned:
+- Software RAID
+- Cloud Sync and Mount
+- Posix Compliant
+'''
+import os
+import sys
+import multiprocessing as mp
+import queue
+import random
+# If we are running from the pyfuse3 source directory, try
+# to load the module from there first.
+basedir = os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), '..'))
+if (os.path.exists(os.path.join(basedir, 'setup.py')) and
+    os.path.exists(os.path.join(basedir, 'src', 'pyfuse3.pyx'))):
+    sys.path.insert(0, os.path.join(basedir, 'src'))
 
-#import concurrent
-import gc
-import os.path
 import time
 import copy
 import mmap
 import hashlib
-import traceback
 import lzma
-import multiprocessing as mp
 import math
-# from decimal import *
 import struct
 from hashing import hashed_chunks, hash_data
-from concurrent import futures
 from stats import Timer, humanbytes, memory
 from compression import compressed_pickle, decompress_pickle, decompress_data, compress_data
 from BTrees import IOBTree
 from collections import OrderedDict, deque
-import queue
-
-import sys
+from functools import lru_cache
+import pyfuse3
+import errno
+import stat
+from time import time
 import logging
-import argparse
-import threading
-from functools import wraps, lru_cache
-from pathlib import Path, PureWindowsPath
+from collections import defaultdict
+from pyfuse3 import FUSEError
+from argparse import ArgumentParser
+import trio
+import traceback
+from psutil import virtual_memory
+import gc
 
-from configurations import *
 from datastructures import *
+from configurations import *
+from persistence import init_persistance, persist_data
+from stats import unix_memory, resident, stacksize
+import mq_client
 
-from winfspy import (
-    FileSystem,
-    BaseFileSystemOperations,
-    enable_debug_log,
-    FILE_ATTRIBUTE,
-    CREATE_FILE_CREATE_OPTIONS,
-    NTStatusObjectNameNotFound,
-    NTStatusDirectoryNotEmpty,
-    NTStatusNotADirectory,
-    NTStatusObjectNameCollision,
-    NTStatusAccessDenied,
-    NTStatusEndOfFile,
-    NTStatusMediaWriteProtected,
-)
-from winfspy.plumbing.win32_filetime import filetime_now
-from winfspy.plumbing.security_descriptor import SecurityDescriptor
+# from tqdm.asyncio import trange, tqdm
+import tqdm
 
+import commit
 
-lock = threading.Lock()
+# datastore, free_blocks, key_index, hash_table, fs_meta, GC = init_persistance()
 
+write_buffer_lock = False
 
-def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _free_blocks=None, _partition_size=None, _GC=None):
-    debugpy.debug_this_thread()
-    global key_index
-    global datastore
-    global hash_table
-    global free_blocks
+if performance_measure_bars:
+    from progress_bars import space_bar_compression_rate, space_bar_free_space, space_bar_savings, write_bar, dedup_bar, space_bar_over_used
+    from progress_bars import space_bar_used, frag_bar_blocks, frag_bar_space, memory_bar_active, memory_bar_inactive, memory_bar_statck, GC_bar
+
+try:
+    if fs_meta[0] is not None:
+        inodes = fs_meta[0]
+        contents = fs_meta[1]
+    else:
+        inodes = inodes
+        contents = contents
+except:
+        inodes = inodes
+        contents = contents
+
+try:
+    import faulthandler
+except ImportError:
+    pass
+else:
+    faulthandler.enable()
+
+log = logging.getLogger()
+
+class Operations(pyfuse3.Operations):
+    '''An example filesystem that stores all data in memory
+    TODO: REVIEW THIS PROBLEMS
+    This is a very simple implementation with terrible performance.
+    Don't try to store significant amounts of data. Also, there are
+    some other flaws that have not been fixed to keep the code easier
+    to understand:
+
+    * atime, mtime and ctime are not updated
+    * generation numbers are not supported
+    * lookup counts are not maintained
+    '''    
+
     global fs_meta
-    global key_index_path
-    global fs_meta_path
-    global datastore_path
-    global hash_table_path
-    global free_blocks_path
-    global gc_path
-    global GC
+    
+    enable_writeback_cache = False
+    
+    def __init__(self, stat_msg_queue):
+        super(Operations, self).__init__()
+        
+        self.inode_open_count = defaultdict(int)
+        self.stat_msg_queue = stat_msg_queue
+        
+        
+        try:
+            if fs_meta is not None and fs_meta[0] is None or fs_meta[1] is None:
+                self.inodes = inodes
+                self.contents = contents
+                self.init_file_system()
+            else:
+                self.inodes = fs_meta[0]
+                self.contents = fs_meta[1]
+        except TypeError:
+            self.inodes = inodes
+            self.contents = contents
+            self.init_file_system()
+            
 
-    if _keys is None:
-        key_index_path = os.path.join(os.getcwd(), 'metadata', "key_index.vfs")
-    else:
-        key_index_path = _keys
 
-    if os.path.isfile(key_index_path):
-        key_index = decompress_pickle(key_index_path)
+    def init_file_system(self):
+        '''Initialize file system '''
 
-    if _GC is None:
-        gc_path = os.path.join(os.getcwd(), 'metadata', "gc.vfs")
-    else:
-        gc_path = _GC
+        now_ns = int(time.time_ns())
+        new_file = File_Inode(pyfuse3.ROOT_INODE)        
+        new_file.mode = stat.S_IFDIR | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH
+        new_file.uid = os.getuid()
+        new_file.gid = os.getgid()
+        new_file.mtime_ns = now_ns
+        new_file.atime_ns = now_ns
+        new_file.ctime_ns = now_ns
+        self.inodes[pyfuse3.ROOT_INODE] = new_file
 
-    if os.path.isfile(gc_path):
-        GC = decompress_pickle(gc_path)
+        root_dir = Directory_Inode(pyfuse3.ROOT_INODE)
+        root_dir.name = b'..'
+        root_dir.parent_inode = pyfuse3.ROOT_INODE
+        root_dir.inode = pyfuse3.ROOT_INODE
+        self.contents[pyfuse3.ROOT_INODE] = root_dir
 
-    if _hash is None:
-        hash_table_path = os.path.join(os.getcwd(), 'metadata', "hash_table.bin")
-    else:
-        hash_table_path = _hash
 
-    if os.path.isfile(hash_table_path):
-        hash_table = decompress_pickle(hash_table_path)
-
-    if _free_blocks is None:
-        free_blocks_path = os.path.join(os.getcwd(), 'metadata', "free_blocks.bin")
-    else:
-        free_blocks_path = _free_blocks
-
-    if os.path.isfile(free_blocks_path):
-        free_blocks = decompress_pickle(free_blocks_path)
-
-    if _fs_meta is None:
-        fs_meta_path = os.path.join(os.getcwd(), 'metadata', "fs.meta")
-    else:
-        fs_meta_path = _fs_meta
-
-    if os.path.isfile(fs_meta_path):
-        fs_meta = decompress_pickle(fs_meta_path)
-
-    if _datastore is None:
-        datastore_path = os.path.join(os.getcwd(), 'metadata')
-    else:
-        datastore_path = _datastore
-
-    for chunk in datastore_chunks:
-        chunk_path = os.path.join(os.getcwd(), 'metadata', 'chunk' + str(chunk) + '.ds.vfs')
-
-        if os.path.isfile(chunk_path):
-            print("Found existing File System. Re-mounting it. Chunk:" +str(chunk))
-            datastore.append(DataStore(chunk, chunk_size, chunk_path))
+    async def lookup(self, inode_p, name, ctx=None):
+        inode = None
+        if name == '.':
+            inode = inode_p
+        elif name == '..':
+            inode = self.contents[inode_p]
+        elif str(b'.Trash') in str(name):
+            raise(pyfuse3.FUSEError(errno.ENOENT))
         else:
-            f = open(os.path.join(os.getcwd(), 'metadata', 'chunk'+str(chunk)+'.ds.vfs'), "wb")
-            f.write(b'\x00\x00\x00\x00\x00')
-            f.flush()
-            f.close()
-            ds = open(chunk_path, "r+b")
-            tmp_map = mmap.mmap(ds.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
-            datastore.append(DataStore(chunk, chunk_size, chunk_path))
-            tmp_map.close()
-            ds.close()
+            try:
+                for i in self.contents:
+                    if self.contents[i].parent_inode ==  inode_p and self.contents[i].name == name:
+                        inode = self.contents[i].inode
+                        break                        
+            except TypeError:                
+                raise(pyfuse3.FUSEError(errno.ENOENT))
+            except AttributeError:
+                raise(pyfuse3.FUSEError(errno.ENOENT))
+            except KeyError:
+                raise (pyfuse3.FUSEError(errno.ENOENT))
+            
+            if inode is None:
+                raise(pyfuse3.FUSEError(errno.ENOENT))
 
-            free_blocks.append(IOBTree.IOBTree())
+        return await self.getattr(inode, ctx)
 
-    return datastore, free_blocks, key_index, hash_table, fs_meta
+    async def getattr(self, inode, ctx=None):        
+
+        try:
+            f = self.inodes[inode]
+
+            entry = pyfuse3.EntryAttributes()
+            entry.st_ino = inode
+            entry.generation = 0
+            entry.entry_timeout = 300
+            entry.attr_timeout = 300
+            entry.st_mode = f.mode
+
+            entry.st_nlink = 1 #await self.count_entries(inode) # #TODO O sistema vai suportar HARD-LINKS? Caso negativo, apenas retornar 2, funciona
+
+            entry.st_uid = f.uid
+            entry.st_gid = f.gid
+            entry.st_rdev = f.rdev
+            entry.st_size = f.size
+
+            entry.st_blksize = allocation_unit
+            entry.st_blocks = 1
+            entry.st_atime_ns = f.atime_ns
+            entry.st_mtime_ns = f.mtime_ns
+            entry.st_ctime_ns = f.ctime_ns
+        except KeyError:
+            raise (pyfuse3.FUSEError(errno.ENOENT))
+
+        return entry
 
 
-def persist_data(fs_meta=None):
-    debugpy.debug_this_thread()
-    global key_index
-    global datastore
-    # global fs_meta
-    global key_index_path
-    global fs_meta_path
-    global datastore_path
-    global write_buffer    
-    global hash_table
-    global hash_table_path
-    global free_blocks_path
-    global lock
-    global GC
-    global gc_path
-    
-    if not compressed_pickle(key_index_path, key_index.copy()):
-        print("DEBUG: Persistence of Key Index Deferred.")
-    
-    if not compressed_pickle(hash_table_path, hash_table.copy()):
-        print("DEBUG: Persistence of Hash Table Deferred.")
-    
-    if not compressed_pickle(free_blocks_path, free_blocks.copy()):
-        print("DEBUG: Persistence of Free Blocks Deferred.")
-    
-    if not compressed_pickle(gc_path, copy.copy(GC)):
-        print("DEBUG: Persistence of GC Deferred.")
-    
-    if not compressed_pickle(fs_meta_path, fs_meta):
-        print("DEBUG: Persistence File System Meta Info Deferred.")
+    async def readlink(self, inode, ctx):
+        return self.inodes[inode].target        
 
-    return True
+    async def opendir(self, inode, ctx):
+        return inode
+
+    async def readdir(self, inode, off, token):
+        dir_entries = []
+        for d in self.contents:
+            if self.contents[d].parent_inode == inode:
+                dir_entries.append(self.contents[d])
+
+        try:
+            pyfuse3.readdir_reply(token, dir_entries[off].name, await self.getattr(dir_entries[off].inode), off+1)
+        except IndexError:
+            return False
+
+    async def unlink(self, inode_p, name,ctx):
+        entry = await self.lookup(inode_p, name)
+
+        if stat.S_ISDIR(entry.st_mode):
+            raise pyfuse3.FUSEError(errno.EISDIR)
+
+        self._remove(inode_p, name, entry)
+
+    async def rmdir(self, inode_p, name, ctx):
+        entry = await self.lookup(inode_p, name)
+
+        if not stat.S_ISDIR(entry.st_mode):
+            raise pyfuse3.FUSEError(errno.ENOTDIR)
+
+        self._remove(inode_p, name, entry)
+
+    def _remove(self, inode_p, name, entry):
+        if self.contents[inode_p].inode != inode_p and self.contents[inode_p].parent_inode == inode_p and self.contents[inode_p].name != name:
+            raise pyfuse3.FUSEError(errno.ENOTEMPTY)
+        
+        for e in list(self.contents.keys()): #TODO: LENTO MUDAR
+            if self.contents[e].name == name and self.contents[e].parent_inode == inode_p:
+                self.contents.pop(e)
+                break
+
+        if entry.st_nlink == 1 and entry.st_ino not in self.inode_open_count:
+            try:
+                removed = self.inodes.pop(entry.st_ino)
+                for b in removed.data:
+                    update_index(b.hash, chunk=None, add=False)
+            except KeyError:
+                print(traceback.format_exc())
+                print("Key already removed")
+
+    async def symlink(self, inode_p, name, target, ctx):
+        mode = (stat.S_IFLNK | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
+                stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
+                stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH)
+        return await self._create(inode_p, name, mode, ctx, target=target)
+
+    async def rename(self, inode_p_old, name_old, inode_p_new, name_new,
+                     flags, ctx):
+        if flags != 0:
+            raise FUSEError(errno.EINVAL)
+
+        entry_old = await self.lookup(inode_p_old, name_old)
+
+        try:
+            entry_new = await self.lookup(inode_p_new, name_new)
+        except pyfuse3.FUSEError as exc:
+            if exc.errno != errno.ENOENT:
+                raise
+            target_exists = False
+        else:
+            target_exists = True
+
+        if target_exists:
+            self._replace(inode_p_old, name_old, inode_p_new, name_new,
+                          entry_old, entry_new)
+        else:
+            old = self.contents[inode_p_old]
+            old.name = name_new
+            old.parent_inode = inode_p_new
+            self.contents[inode_p_old] = old
+            # self.inodes[inode_p_old] = old
+
+
+    def _replace(self, inode_p_old, name_old, inode_p_new, name_new,
+                 entry_old, entry_new):
+
+        for c in self.contents:            
+            if self.contents[c].inode != inode_p_old and self.contents[c].parent_inode == inode_p_old and self.contents[c].name != name_old and str('.trashinfo.') not in str(name_new) and str('.trashinfo.') not in str(name_old):
+                raise pyfuse3.FUSEError(errno.ENOTEMPTY)
+        
+        old = self.contents.pop(inode_p_old)
+        new_d = Directory_Inode(self.contents)
+        new_d.name = old.name
+        new_d.inode = entry_old.st_ino
+        new_d.parent_inode = old.parent_inode
+        self.contents[new_d.inode] = new_d
+
+        # if entry_new.st_nlink == 1 and entry_new.st_ino not in self.inode_open_count:
+        #     for i in list(self.inodes.keys()):
+        #         if self.inodes.get(i).id == entry_new.st_ino:
+        #             removed = self.inodes.pop(i)
+        #             for b in removed.data:
+        #                 update_index(b.hash, chunk=None, add=False)
+
+
+    async def link(self, inode, new_inode_p, new_name, ctx):
+        entry_p = await self.getattr(new_inode_p)
+        if entry_p.st_nlink == 0:
+            log.warning('Attempted to create entry '+ str(new_name) + 'with unlinked parent '+ str(new_inode_p))
+            raise FUSEError(errno.EINVAL)
+
+        d = Directory_Inode(len(self.contents))
+        d.name = new_name
+        d.inode = inode
+        d.parent_inode = new_inode_p
+        self.contents[inode] = d
+
+        return await self.getattr(inode)
+
+    async def setattr(self, inode, attr, fields, fh, ctx):
+
+        old_inode = self.inodes[inode]
+
+        if fields.update_size:
+            size = 0
+            f = self.inodes[inode]
+            for d in f.data:
+                size = size + d.size
+            if size > 0:
+                old_inode.size = size
+            
+        if fields.update_mode:
+            old_inode.mode = attr.st_mode          
+
+        if fields.update_uid:
+            old_inode.uid = attr.st_uid
+            
+        if fields.update_gid:
+            old_inode.gid = attr.st_gid   
+        
+        if fields.update_atime:
+            old_inode.atime_ns = attr.st_atime_ns            
+
+        if fields.update_mtime:
+            old_inode.mtime_ns = attr.st_mtime_ns            
+
+        if fields.update_ctime:
+            old_inode.ctime_ns = attr.st_ctime_ns
+            
+        else:
+            old_inode.ctime_ns = time.time_ns()
+            
+        self.inodes[inode] = old_inode
+
+        return await self.getattr(inode)
+
+    async def mknod(self, inode_p, name, mode, rdev, ctx):
+        return await self._create(inode_p, name, mode, ctx, rdev=rdev)
+
+    async def mkdir(self, inode_p, name, mode, ctx):
+        return await self._create(inode_p, name, mode, ctx)
+
+    async def statfs(self, ctx):
+        stat_ = pyfuse3.StatvfsData()
+
+        stat_.f_bsize = allocation_unit
+        stat_.f_frsize = allocation_unit
+
+        size = 0
+        for k in list(self.inodes.keys()):
+            size = size + self.inodes[k].size
+        stat_.f_blocks = max(0, (partition_size_gb // stat_.f_frsize))
+        # stat_.f_blocks = size // stat_.f_frsize
+        stat_.f_bfree = max(0, (partition_size_gb - get_usage(self.stat_msg_queue)[2]) // allocation_unit )#stat_.f_blocks - (size // allocation_unit)
+        # stat_.f_bfree = max(size // stat_.f_frsize, 1024) #TODO: WHAT IS THIS SHIT?
+        stat_.f_bavail = stat_.f_bfree
+
+        fs_inodes = len(self.inodes)
+        stat_.f_files = fs_inodes
+        stat_.f_ffree = stat_.f_bfree
+        stat_.f_favail = stat_.f_ffree
+
+        return stat_
+
+    async def open(self, inode, flags, ctx):
+        # Yeah, unused arguments
+        #pylint: disable=W0613
+        self.inode_open_count[inode] += 1
+
+        # Use inodes as a file handles
+        return pyfuse3.FileInfo(fh=inode, direct_io=True, keep_cache=False)
+
+    async def access(self, inode, mode, ctx):
+        # Yeah, could be a function and has unused arguments
+        #pylint: disable=R0201,W0613
+        return True
+
+    async def create(self, inode_parent, name, mode, flags, ctx):
+        #pylint: disable=W0612
+        entry = await self._create(inode_parent, name, mode, ctx)
+        self.inode_open_count[entry.st_ino] += 1
+        return (pyfuse3.FileInfo(fh=entry.st_ino, direct_io=True, keep_cache=False), entry)
+
+    async def _create(self, inode_p, name, mode, ctx, rdev=0, target=None):
+        if (await self.getattr(inode_p)).st_nlink == 0:
+            log.warning('Attempted to create entry '+ str(name) + 'with unlinked parent '+ str(inode_p))
+            raise FUSEError(errno.EINVAL)
+
+        inode = len(self.inodes)+1
+        now_ns = time.time_ns()        
+        new_file = File_Inode(inode)
+        new_file.mode = mode
+        new_file.uid = ctx.uid
+        new_file.gid = ctx.gid
+        new_file.mtime_ns = now_ns
+        new_file.atime_ns = now_ns
+        new_file.ctime_ns = now_ns
+        new_file.target = target
+        new_file.rdev = rdev
+        self.inodes[new_file.id] = new_file
+        
+        d = Directory_Inode(inode)
+        d.name = name
+        d.parent_inode = inode_p
+
+        self.contents[inode] = d
+        
+        return await self.getattr(inode)
+
+    
+    async def read(self, fh, offset, length):
+        # debugpy.debug_this_thread()
+        f = None
+        for i in list(self.inodes.keys()):
+            if self.inodes[i].id == fh:
+                f = self.inodes[i]
+
+        if len(self.inodes[fh].data) == 0:
+            data = b''
+        
+        else:        
+            # if offset >= self.inodes[fh].size:
+            #     print("End of File")
+            #     raise IOError
+            end_offset = min(self.inodes[fh].size, offset + length)
+
+            start_blk = 0
+            start_diff = 0
+            end_blk = 0
+            end_diff = 0
+
+            internal_offset = 0
+            for blk_number, blk in enumerate(self.inodes[fh].data):
+                internal_offset = internal_offset + blk.size
+                if internal_offset < offset:
+                    continue
+                elif internal_offset == offset:
+                    start_blk = blk_number + 1
+                    break
+                else:
+                    start_blk = blk_number
+                    start_diff = internal_offset - offset                    
+                    break
+
+            internal_offset_e = 0
+            for blk_number_e, blk_e in enumerate(self.inodes[fh].data):
+                internal_offset_e = internal_offset_e + blk_e.size
+                if internal_offset_e < end_offset:
+                    continue
+                elif internal_offset_e == end_offset:
+                    end_blk = blk_number_e
+                    break
+                else:
+                    end_diff = internal_offset_e - end_offset
+                    end_blk = blk_number_e
+
+                    break
+
+            if start_blk == 0 and end_blk == 0:        
+                return get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
+            else:
+                data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
+
+                if self.inodes[fh].size == end_offset:
+                    data = data[-(end_offset-offset):]
+                else:
+                    if start_diff < 0:
+                        print(start_diff)
+                    if start_blk == 0:
+                        data = data[offset:]
+                    elif offset > 0 and start_diff > 0:
+                        data = data[self.inodes[fh].data[start_blk].size-start_diff:]
+                    if end_diff > 0 and len(data) > (end_offset-offset):
+                        data = data[:-end_diff]
+
+            if data == b'':
+                print("Fuck it")
+
+            if len(data) != (end_offset - offset):
+                print("data problem")
+            return data
+
+        if data is None:
+            data = b''
+
+        return data
+
+    
+    async def write(self, fh, offset, buf):
+        # debugpy.debug_this_thread()
+        f = None
+        for i in list(self.inodes.keys()):
+            if self.inodes.get(i).id == fh:
+                f = self.inodes[i]
+                break
+
+        end_offset = offset + len(buf)
+        if end_offset > f.size:
+            f.size = end_offset #TODO: SETAR TAMANHO DO ARQUIVO DE FORMA CORRETA
+
+        f.data += dedup(bytes(buf), self.stat_msg_queue)
+        
+        self.inodes[fh].data = f.data
+        self.inodes[fh].size = f.size
+        # self.inodes.update({fh, f})       
+        
+        inodes = self.inodes    # Coloca os dados do FS de volta na memória compartilhada para pode ser acessada e persistida
+        contents = self.contents    #TODO: TROCAR A FORMA DE USO PARA NAO PRECISAR MANTER 2 VARIAVEIS NA MEMORIA
+        
+        return len(buf)
+
+    async def release(self, fh):
+        self.inode_open_count[fh] -= 1
+
+        if self.inode_open_count[fh] == 0:
+            del self.inode_open_count[fh]
+            if (await self.getattr(fh)).st_nlink == 0:
+                self.inodes.pop(fh)
+
+
+'''
+
+VERATYFS OPERATIONS AND NON OS DEPENDENT CODE
+DEDUP, COMPRESSION, WRITE, DELETE, INDEXES MAINTAINANCE
+
+'''
 
 def get_small_blocks_real_size(start_path = '.'):
     total_size = 0
@@ -179,13 +563,12 @@ def get_small_blocks_real_size(start_path = '.'):
 
     return total_size
 
-def get_usage():
+def get_usage(stat_msg_queue):
     """
     TODO: RECONSIDERAR TROCAR O KEY-INDEX POR UTLIZAÇÃO DE INDICE COM QUANTIDADE NOS BLOCOS
     Return drive virtual (undeduped size) and physical (deduped_size) utilization
     :return: Undeduped Data Un-Compressed, Undeduped Data Compressed, Deduped Data Compressed, Deduped Data Removed, Compression rate
-    """
-    debugpy.debug_this_thread()
+    """    
     global hash_table
     global key_index
 
@@ -199,36 +582,90 @@ def get_usage():
         try:
             if not hash_table[k].DELETED:
                 undeduped_uncompressed = undeduped_uncompressed + (key_index_copy[k] * hash_table[k].deflated_size)
-                undeduped_compressed = undeduped_compressed + (key_index_copy[k] * hash_table[k].size)
+                undeduped_compressed = undeduped_compressed + (max(0, key_index_copy[k]) * hash_table[k].size)
                 deduped_compressed = deduped_compressed + hash_table[k].size
         except KeyError:
             continue
-
+    del key_index_copy
+    
+    fragmenation_size = fragmentation['free_size']
+    fragmenation_quant = fragmentation['free_count']
+   
     if undeduped_compressed != 0 and undeduped_uncompressed != 0:
         compression_rate = undeduped_compressed/undeduped_uncompressed
+    
+    if performance_measure_bars:
+        space_bar_used.reset()
+        space_bar_used.n = min((deduped_compressed //1024//1024), (partition_size_gb//1024//1024))
+        space_bar_used.refresh()
 
-    print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
-    print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
-    print("Deduped (Compression) Space Used : " + humanbytes(deduped_compressed) + " [Duplicated data found (Saved Space): " + humanbytes(undeduped_uncompressed -deduped_compressed) + " ]")
-    print("Compression Rate : " + str(1 - compression_rate) + "% Saved Space: " + humanbytes(undeduped_uncompressed - undeduped_compressed))
-    print("Total Savings: " + humanbytes((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)))
+        space_bar_savings.reset()
+        space_bar_savings.n = ((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed - deduped_compressed))//1024//1024
+        space_bar_savings.refresh()
 
-    del key_index_copy
+        compbar = (1 - compression_rate)
+        if compbar == 1:
+            compbar = 0
+
+        space_bar_compression_rate.reset()
+        space_bar_compression_rate.n = max(0.0, round(compbar*100, 3))
+        space_bar_compression_rate.refresh()
+
+        space_bar_free_space.reset()
+        space_bar_free_space.n = max(0,(partition_size_gb - (deduped_compressed)) //1024//1024)
+        space_bar_free_space.refresh()
+
+        space_bar_over_used.reset()
+        space_bar_over_used.n = max(0, (deduped_compressed //1024//1024) - (partition_size_gb//1024//1024))
+        space_bar_over_used.refresh()
+
+        frag_bar_space.reset()
+        frag_bar_space.n = max(0, fragmentation['free_size'] //1024//1024)
+        frag_bar_space.refresh()
+
+        frag_bar_blocks.reset()
+        frag_bar_blocks.n = fragmentation['free_count'] 
+        frag_bar_blocks.refresh()
+
+    else:
+        stat_msg_queue.put({'STAT:TOTAL_SIZE':partition_size_gb})
+        stat_msg_queue.put({'STAT:Undeduped (No Compression) Space Used':undeduped_uncompressed})        
+        stat_msg_queue.put({'STAT:Free Space': (max(0,(partition_size_gb - (deduped_compressed))))})
+        stat_msg_queue.put({'STAT:Undeduped (Compression) Space Used':undeduped_compressed})
+        stat_msg_queue.put({'STAT:Deduped (Compression) Space Used':deduped_compressed})
+        stat_msg_queue.put({'STAT:Compression Rate':1 - compression_rate})
+        stat_msg_queue.put({'STAT:Total Savings':(undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)})
+        stat_msg_queue.put({'STAT:Fragmentation':max(0, fragmentation['free_size'])})
+        stat_msg_queue.put({'STAT:Fragmented Blocks':fragmentation['free_count']})
+    
+    # print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
+    # print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
+    # print("Deduped (Compression) Space Used : " + humanbytes(deduped_compressed) + " [Duplicated data found (Saved Space): " + humanbytes(undeduped_uncompressed -deduped_compressed) + " ]")
+    # print("Compression Rate : " + str(1 - compression_rate) + "% Saved Space: " + humanbytes(undeduped_uncompressed - undeduped_compressed))
+    # print("Total Savings: " + humanbytes((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)))
+
+    gc.collect()
 
     return undeduped_uncompressed, undeduped_compressed, deduped_compressed, (undeduped_compressed-deduped_compressed), compression_rate
 
 
-def garbage_collector():
-    debugpy.debug_this_thread()
+def garbage_collector(stat_msg_queue):    
     global free_blocks
     global hash_table
     global key_index
+    global fragmentation
 
-
+    if performance_measure_bars:
+        # GC_bar.reset()
+        GC_bar.total = GC_bar.total + (len(GC.add_uses) + len(GC.remove_uses))
+        GC_bar.refresh()
+    
     try:        
         while len(GC.add_uses) > 0:
             add = GC.add_uses.popleft()
-            hash_table[add].uses = hash_table[add].uses + 1            
+            hash_table[add].uses = hash_table[add].uses + 1 
+            if performance_measure_bars:
+                GC_bar.update(1)
     except IndexError:
         pass
 
@@ -237,16 +674,25 @@ def garbage_collector():
             remove = GC.remove_uses.popleft()
             hash_table[remove].uses = hash_table[remove].uses - 1
             if hash_table[remove].uses <= 0:
-                if hash_table[remove].size <= small_block_limit:
-                    r = delete_small_block(remove)
-                    if not r:
-                        print("DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete.")
                 hash_table[remove].DELETED = True
-                try:
-                    free_blocks[hash_table[remove].chunk].get(hash_table[remove].size).append(hash_table[remove].offset)
-                except AttributeError:
-                    free_blocks[hash_table[remove].chunk].insert(hash_table[remove].size, [hash_table[remove].offset])
-                
+                if hash_table[remove].size <= small_block_limit:
+                    r = delete_small_block(remove, stat_msg_queue)
+                    if not r:
+                        print("DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete.")                
+                else:
+                    try:
+                        free_blocks[hash_table[remove].chunk].get(hash_table[remove].size).append(hash_table[remove].offset)                    
+                    except AttributeError:
+                        free_blocks[hash_table[remove].chunk].insert(hash_table[remove].size, [hash_table[remove].offset])
+                    finally:
+                        fragmentation['free_size'] = fragmentation['free_size'] + hash_table[remove].size
+                        fragmentation['free_count'] = fragmentation['free_count'] + 1
+            if performance_measure_bars:
+                GC_bar.update(1)
+            else:
+                if random.randrange(1,q_random) == 1:
+                    stat_msg_queue.put({'INFO:GCProgress' : str((len(GC.add_uses) + len(GC.remove_uses)))})
+
     except IndexError:
         pass
 
@@ -257,19 +703,18 @@ def garbage_collector():
 # A quantidade de referencias indica quantas vezes aquele bloco esta sendo usado, quanto chegar a zero, ele deve ser
 # removido ou sobrescrito
 
-def update_index(idx, chunk=None, add=True):
+def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
     """
 
     :param chunk:
     :param idx: Hash of the block as of in the hash_table
     :param add: Operation. Should the block usage count go up or down?
     :return:
-    """
-    debugpy.debug_this_thread()
+    """    
     global key_index
-    global lock
-    in_index = False
+    global free_blocks
 
+    in_index = False
     
     if idx in key_index:
         in_index = True
@@ -283,7 +728,11 @@ def update_index(idx, chunk=None, add=True):
     else:
         try:
             if in_index and key_index[idx] - key_index[idx] <= 0:
-                # free_blocks[chunk].append(hash_table[idx])
+                if free_blocks[hash_table[idx].chunk].get(hash_table[idx].size) is not None:
+                    free_blocks[hash_table[idx].chunk].get(hash_table[idx].size).append(hash_table[idx].offset)                    
+                else:
+                    free_blocks[hash_table[idx].chunk].insert(hash_table[idx].size, [hash_table[idx].offset])                    
+                    
                 GC.remove_uses.append(idx)
                 hash_table[idx].DELETED = True
                 hash_table[idx].DELETION_TIME = time.time()
@@ -291,8 +740,7 @@ def update_index(idx, chunk=None, add=True):
                     del key_index[idx]
                     del read_cache[idx]
                 except KeyError:
-                    pass
-                # update_hash_table(_hash=idx, _operation=-1)
+                    pass                
             elif in_index:
                 key_index[idx] = key_index[idx] - 1
                 hash_table[idx].uses = hash_table[idx].uses - -1
@@ -303,46 +751,44 @@ def update_index(idx, chunk=None, add=True):
     return True
 
 
-def write_new_blocks(_queued_writes):
+def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
     """
     Writes a series of blocks that where quede
 
     :param _queued_writes: data to be written
     :return: Tuple with the result of the operation and position (block) that the data has been written to
-    """
-    debugpy.debug_this_thread()
+    """    
     global chunk_size
     global datastore
     global free_blocks
     global write_buffer_lock
-    global hash_table
-    global fs_meta
-
+    global hash_table    
+    
+    write_buffer_lock = True
     registers_processed = 0
     bytes_processed = 0
-    writing = True
+    writing = True    
     start_time = time.time()
 
-    write_buffer_lock = True
+    
     while writing:
+        
+        if performance_measure_bars and write_bar.n > write_bar.total:
+            write_bar.reset()
+            write_bar.total = write_bar.total + wq.qsize() + swq.qsize()
+            # write_bar.total = write_bar.total + len(write_buffer)           
+            write_bar.refresh()
 
-        try:
+        try:            
             q = write_buffer.popleft()
-            if not q.result:
+            if not q.result and q.hash not in hash_table:
                 try:
-                    written = 0
-                    written_hash = ""
-
                     if len(q.compressed_data) <= small_block_limit:
-                        if q.compressed:
-                            written = len(q.compressed_data)
-                            write_small_block(q.hash, q.compressed_data)
-                            written_hash = hash_data(q.compressed_data)
+                        if q.compressed:                            
+                            swq.put((q.hash, q.compressed_data))                                                        
                             q.chunk = -1                            
-                        else:
-                            written = len(q.data)
-                            write_small_block(q.hash, q.data)
-                            written_hash = hash_data(q.data)
+                        else:                            
+                            swq.put((q.hash, q.data))                            
                             q.chunk = -1                        
                     else:
                         for idx, ds in enumerate(datastore):
@@ -365,85 +811,87 @@ def write_new_blocks(_queued_writes):
                                         q.block = fb.get(s).pop(0)
                                         if len(fb.get(s)) == 0:
                                             fb.pop(s)
-                                        # free_blocks[hash_table[remove].chunk][0].pop(hash_table[remove].offset)
+                                            fragmentation['free_size'] = fragmentation['free_size'] - s
+                                            fragmentation['free_count'] = fragmentation['free_count'] - 1                                   
                                         break
                                     except ValueError:
                                         if ds == len(free_blocks) - 1:
                                             print("Partition FULL. No free blocks that can fit the data.")
-                                            raise NTStatusAccessDenied
+                                            raise IOError
                                         else:
                                             continue                    
                         try:
-                            if os.path.isfile(datastore[q.chunk].path):     # TODO: Organize all the data in one single write
-                                with open(datastore[q.chunk].path, "r+b") as f:
-                                    mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
-                                    mm.seek(q.block)
-                                    if q.compressed:
-                                        written = mm.write(q.compressed_data)
-                                        written_hash = hash_data(q.compressed_data)
-                                    else:
-                                        written = mm.write(q.data)
-                                        written_hash = hash_data(q.data)
-                        except ValueError:
-                            print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
+                            wq.put_nowait((q, datastore))
+                        except:
+                            print('Error sending data to the flusing queue')
                             print(traceback.format_exc())
+                       
+                    q.result = True                    
+                    hash_table[q.hash] = Block()
+                    hash_table[q.hash].hash = q.hash
+                    hash_table[q.hash].chunk = q.chunk
+                    hash_table[q.hash].offset = q.block
+                    hash_table[q.hash].size = len(q.compressed_data)
+                    hash_table[q.hash].deflated_size = len(q.data)
+                    hash_table[q.hash].compressed = q.compressed
+                    update_index(q.hash, q.chunk, True, stat_msg_queue)
 
-                    if not q.compressed and written_hash != q.hash:
-                        print("Data corruption - Hash inconsistance")
+                    if len(q.compressed_data) <= small_block_limit:
+                        small_block_read_cache[q.hash] = q.data
 
-                    if q.compressed and written_hash != hash_data(q.compressed_data):
-                        print("Data corruption - Hash inconsistance")
-
-                    if len(q.compressed_data) == written or len(q.data) == written:
-                        q.result = True
-                        # update_hash_table(q.hash, q.block, q.chunk, 1)
-                        hash_table[q.hash] = Block()
-                        hash_table[q.hash].hash = q.hash
-                        hash_table[q.hash].chunk = q.chunk
-                        hash_table[q.hash].offset = q.block
-                        hash_table[q.hash].size = len(q.compressed_data)
-                        hash_table[q.hash].deflated_size = len(q.data)
-                        hash_table[q.hash].compressed = q.compressed
-
-                        if len(q.compressed_data) <= small_block_limit:
-                            small_block_read_cache[q.hash] = q.data
-
-                        update_index(q.hash, q.chunk, True)
-
-                        registers_processed = registers_processed + 1
-                        bytes_processed = bytes_processed + written
-                        try:
-                            del write_read_cache[q.hash]
-                        except KeyError:
-                            print('DESGRAÇA')
-                        continue
+                    registers_processed = registers_processed + 1
+                    if q.compressed:
+                        bytes_processed = bytes_processed + len(q.compressed_data)
                     else:
-                        print("IOError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
-                        print(traceback.format_exc())
-                        raise IOError
+                        bytes_processed = bytes_processed + len(q.data)
+                    
+                    if performance_measure_bars:
+                        write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+                        write_bar.update(1)                            
+                        # write_bar.refresh()
+                    try:
+                        del write_read_cache[q.hash]
+                    except KeyError:
+                        continue
+                        # print('Read cache Key error, the following key is nor present at the write read cache:' + str(q.hash))
+                    continue                    
 
                 except Exception:
-                    print(traceback.format_exc())
+                    print(traceback.format_exc()) 
+            else:
+                # Count the register as done and update counters and bars if needed
+                registers_processed = registers_processed + 1                
+                if q.compressed:
+                    bytes_processed = bytes_processed + len(q.compressed_data)
+                else:
+                    bytes_processed = bytes_processed + len(q.data)
+                
+                if performance_measure_bars:
+                    write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+                    write_bar.update(1)
 
         except IndexError:
-            if registers_processed > 0:
-                print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
-                print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")
-                persist_data(fs_meta)
             writing = False
             write_buffer_lock = False
-            gc.collect()
-            break
+    
     write_buffer_lock = False
-    # return _queued_writes
+    
+    if registers_processed > 0:
+        if performance_measure_bars:
+            write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+        # else:
+        #     if random.randrange(1,q_random) == 1:
+        # stat_msg_queue.put({'INFO:WriteSpeed' : bytes_processed/(time.time()-start_time)})
+            # print(humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+        # pass
+        # print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
+        # print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")    
 
 
-def dedup(data):
-    debugpy.debug_this_thread()
+def dedup(data, stat_msg_queue):    
     global datastore
     global free_blocks    
-    global hash_table
-    global lock
+    global hash_table    
     global read_cache
     global write_buffer
     global write_read_cache
@@ -451,13 +899,18 @@ def dedup(data):
     blk_list = []
     queued_writes = []
 
+    start_time = time.time()
+    bytes_processed = 0
     if type(data) == bytearray or type(data) == bytes:
         if type(data) == bytes:
             data = bytearray(data)
-
-        ch = variable_chunks(data)
-        for c in ch:
-            # read_cache[c.hash] = c.data
+        
+        ch = variable_chunks(data)        
+        if performance_measure_bars:
+            # dedup_bar.reset()
+            dedup_bar.total = len(ch) + dedup_bar.total
+            dedup_bar.refresh()
+        for c in ch:            
             blk_list.append(0)
 
             if c.hash in hash_table:
@@ -465,36 +918,44 @@ def dedup(data):
                 update_index(c.hash)
             else:
                 done = False
-                for q in queued_writes:   #  Verify if this block has already been processed in this batch
-                    if q.hash == c.hash:
-                        blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
-                        GC.add_uses.append(c.hash)                        
-                        done = True                        
-                        break
-                wb = write_buffer.copy()
-                for w in wb:   #  Verify if this block is already in the write queue to be writtn
-                    if w.hash == c.hash:
-                        blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
-                        GC.add_uses.append(c.hash)                        
-                        done = True
-                        break
-                del wb
+                # for q in queued_writes:   #  Verify if this block has already been processed in this batch
+                #     if q.hash == c.hash:
+                #         blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
+                #         GC.add_uses.append(c.hash)                        
+                #         done = True                        
+                #         break
+                # # wb = write_buffer.copy()
+                # for w in write_buffer:   #  Verify if this block is already in the write queue to be writtn
+                #     if w.hash == c.hash:
+                #         blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
+                #         GC.add_uses.append(c.hash)                        
+                #         done = True
+                #         break
+                # # del wb
                 if not done:
                     q = QueuedWrite(len(blk_list)-1, c.hash, c.data)
                     blk_list[q.idx] = FileBlock(q.hash, len(c.data))
                     write_read_cache[c.hash] = c.data
-                    write_buffer.append(q)
+                    write_buffer.append(q)            
+            bytes_processed = bytes_processed + len(c.data)
 
+            if performance_measure_bars:
+                dedup_bar.update(1)                
+                # dedup_bar.refresh()
     else:
         print("Value Error when preparing writes")
         print(traceback.format_exc())
         raise ValueError
-
+    
+    if performance_measure_bars:
+        dedup_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+    else:
+        if random.randrange(1,q_random) == 1:
+            stat_msg_queue.put({'INFO:DedupSpeed' : bytes_processed/ (time.time()- start_time)})
     return blk_list
 
 
-def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset=0, check_integrity=False):
-    debugpy.debug_this_thread()
+def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offset=0, end_offset=0):    
     global datastore
     global allocation_unit
     global hash_table
@@ -503,12 +964,14 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
     data = bytearray()
 
     cached = False    
-    r = bytearray()
+    r = bytearray()   
+    
+    start_time = time.time()
+    bytes_processed = 0
 
     for idx, b in enumerate(blklst):
         if idx < start_block:
-            continue
-            # at_start = at_start + 1
+            continue            
         elif idx > end_block:
             return data
 
@@ -527,7 +990,7 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
             
             if hash_table[b.hash].chunk == -1:
                 try:
-                    d = read_small_block(b.hash)
+                    d = read_small_block(b.hash, stat_msg_queue)
                     if hash_table[b.hash].compressed:
                             d = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read                    
                     small_block_read_cache[b.hash] = d
@@ -565,11 +1028,9 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
                         else:
                             decompresed_data = d
 
-                        read_cache[_hash] = decompresed_data
-
-                    # if _hash != hash_data(decompresed_data):
-                    #     print('Critical data failure')
-                        # decompresed_data = d
+                        read_cache[_hash] = decompresed_data                        
+                        mm.close()
+                    
                     d = decompresed_data
 
                 else:
@@ -579,9 +1040,13 @@ def get_file_data(blklst, start_block=None, end_block=None, offset=0, end_offset
 
             if b.hash != hash_data(d):
                 print('Critical data failure')
-            if d is not None:
+            if d is not None:                
                 data += d
-
+                bytes_processed = bytes_processed + len(d)
+    if random.randrange(1,q_random) == 1:
+        stat_msg_queue.put({'INFO:ReadSpeed' : str(bytes_processed/ (time.time()- start_time))})
+    
+        
     return data
 
 
@@ -607,797 +1072,237 @@ def chunks(lst, n):
 def variable_chunks(data):
     return hashed_chunks(data)
 
-""""
-FILE SYSTEM OPERATIONS
-"""
+'''
+
+CODE INITIALIZATION AND RUN
+
+'''
+
+def init_logging(debug=False):
+    formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(threadName)s: '
+                                  '[%(name)s] %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    root_logger = logging.getLogger()
+    if debug:
+        handler.setLevel(logging.DEBUG)
+        root_logger.setLevel(logging.DEBUG)
+    else:
+        handler.setLevel(logging.INFO)
+        root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
+
+def parse_args():
+    '''Parse command line'''
+
+    parser = ArgumentParser()
+
+    parser.add_argument('mountpoint', type=str,
+                        help='Where to mount the file system')
+    parser.add_argument('--debug', action='store_true', default=False,
+                        help='Enable debugging output')
+    parser.add_argument('--debug-fuse', action='store_true', default=False,
+                        help='Enable FUSE debugging output')
+
+    return parser.parse_args()
 
 
-def operation(fn):
-    """Decorator for file system operations.
+async def parent(stat_msg_queue):    
 
-    Provides both logging and thread-safety
-    """
-    name = fn.__name__
-
-    @wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        head = args[0] if args else None
-        tail = args[1:] if args else ()
+    print("Starting main process coodenator...")
+    async with trio.open_nursery() as nursery:
         try:
-            with self._thread_lock:
-                result = fn(self, *args, **kwargs)
-        except Exception as exc:
-            logging.info(f" NOK | {name:20} | {head!r:20} | {tail!r:20} | {exc!r}")
-            raise
-        else:
-            logging.info(f" OK! | {name:20} | {head!r:20} | {tail!r:20} | {result!r}")
-            return result
+            print("Starting: PyFuse Main...")
+            nursery.start_soon(pyfuse3.main)
 
-    return wrapper
+            print("Starting: Persist...")        
+            nursery.start_soon(persist, stat_msg_queue)
 
-
-class BaseFileObj:
-    @property
-    def name(self):
-        """File name, without the path"""
-        return self.path.name
-
-    @property
-    def file_name(self):
-        """File name, including the path"""
-        return str(self.path)
-
-    def __init__(self, path, attributes, security_descriptor):
-        self.path = path
-        self.attributes = attributes
-        self.security_descriptor = security_descriptor
-        now = filetime_now()
-        self.creation_time = now
-        self.last_access_time = now
-        self.last_write_time = now
-        self.change_time = now
-        self.index_number = 0
-        self.file_size = 0
-        self.blklst = []  # Blocos no datastore que compoem o arquivo
-
-    def get_file_info(self):
-        return {
-            "file_attributes": self.attributes,
-            "allocation_size": self.allocation_size,
-            "file_size": self.file_size,
-            "creation_time": self.creation_time,
-            "last_access_time": self.last_access_time,
-            "last_write_time": self.last_write_time,
-            "change_time": self.change_time,
-            "index_number": self.index_number,
-        }
-
-    def security_descriptor_from_string(self, sec_string):
-        self.security_descriptor = SecurityDescriptor.from_string(sec_string)
-        return self.security_descriptor
-
-    def __getstate__(self):
-        # Copy the object's state from self.__dict__ which contains
-        # all our instance attributes. Always use the dict.copy()
-        # method to avoid modifying the original state.
-        # self.security_descriptor = self.security_descriptor.to_string()
-        state = self.__dict__.copy()
-        state['security_descriptor'] = self.security_descriptor.to_string()
-
-        # Remove the unpicklable entries.
-
-        return state
-
-    def __setstate__(self, state):
-        # Restore instance attributes (i.e., filename and lineno).
-        self.__dict__.update(state)
-        # Restore the previously opened file's state. To do so, we need to
-        # reopen it and read from it until the line count is restored.
-        self.security_descriptor = self.security_descriptor_from_string(self.security_descriptor)
-
-    def __repr__(self):
-        return f"{type(self).__name__}:{self.file_name}"
+            print("Start: Usage...")
+            nursery.start_soon(usage, stat_msg_queue)
+            
+        except:
+            print(traceback.format_exc())
 
 
-class FileObj(BaseFileObj):
-
-    global allocation_unit
-
-    def __init__(self, path, attributes, security_descriptor, allocation_size=0):
-        super().__init__(path, attributes, security_descriptor)
-        # self.data = bytearray(allocation_size)
-        ###
-#        self.blklist = []  # Blocos no datastore que compoem o arquivo
-        ###
-        self.attributes |= FILE_ATTRIBUTE.FILE_ATTRIBUTE_ARCHIVE
-        self.allocation_size = allocation_size
-        assert not self.attributes & FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY
-
-    # @property
-    # def allocation_size(self):
-    #     s = 0
-    #     for b in self.blklst:
-    #         s = s + b.size
-    #
-    #     return s
-
-    def set_allocation_size(self, allocation_size):
-        if allocation_size < self.allocation_size:  # TODO: Checar necessidade desta manipulacao
-            self.allocation_size = self.file_size+max_blk_size
-        elif allocation_size == self.file_size:
-            self.allocation_size = self.file_size+max_blk_size
-        else:
-            self.allocation_size = max(self.allocation_size, self.allocation_size+max_blk_size)
-        #     data = self.prepare_file_data()
-        #     data = data[:allocation_size]
-        #     # self.data = self.data[:allocation_size]
-        # if allocation_size > self.allocation_size:
-        #     pass
-            # self.data += bytearray(allocation_size - self.allocation_size)            
-        # assert self.allocation_size == allocation_size
-        # self.allocation_size = self.file_size+max_blk_size
-
-        # self.file_size = min(self.file_size, allocation_size)  - Ultimo, voltar esse caso de merda
-
-    def adapt_allocation_size(self, file_size):
-        # self.set_allocation_size(file_size)
-        # units = (file_size + allocation_unit - 1) // allocation_unit
-        # self.set_allocation_size(units * allocation_unit)
-        self.set_allocation_size(file_size+max_blk_size)
-
-    def set_file_size(self, file_size):
-        if file_size < self.file_size:
-            pass
-        else:
-            self.file_size = file_size
-            # zeros = bytearray(self.file_size - file_size)
-            # self.data[file_size: self.file_size] = zeros
-        if file_size > self.allocation_size:
-            self.adapt_allocation_size(file_size)        
-
-    def read(self, offset, length):
-        debugpy.debug_this_thread()
-        
-        if offset >= self.file_size:
-            raise NTStatusEndOfFile()
-        end_offset = min(self.file_size, offset + length)
-
-        start_blk = 0
-        start_diff = 0
-        end_blk = 0
-        end_diff = 0
-
-        internal_offset = 0
-        for blk_number, blk in enumerate(self.blklst):
-            internal_offset = internal_offset + blk.size
-            if internal_offset < offset:
-                continue
-            elif internal_offset == offset:
-                start_blk = blk_number + 1
-                break
-            else:
-                start_blk = blk_number
-                start_diff = internal_offset - offset
-                # if start_diff > 32769:
-                #     print("tomar no cu")
-                break
-
-        internal_offset_e = 0
-        for blk_number_e, blk_e in enumerate(self.blklst):
-            internal_offset_e = internal_offset_e + blk_e.size
-            if internal_offset_e < end_offset:
-                continue
-            elif internal_offset_e == end_offset:
-                end_blk = blk_number_e
-                break
-            else:
-                end_diff = internal_offset_e - end_offset
-                end_blk = blk_number_e
-
-                break
-
-        if start_blk == 0 and end_blk == 0:
-            return get_file_data(self.blklst, start_blk, end_blk + 1)[offset:end_offset]
-        else:
-            data = get_file_data(self.blklst, start_blk, end_blk)
-
-            if self.file_size == end_offset:
-                data = data[-(end_offset-offset):]
-            else:
-                if start_diff < 0:
-                    print(start_diff)
-                if start_blk == 0:
-                    data = data[offset:]
-                elif offset > 0 and start_diff > 0:
-                    data = data[self.blklst[start_blk].size-start_diff:]
-                if end_diff > 0 and len(data) > (end_offset-offset):
-                    data = data[:-end_diff]
-
-        if data == b'':
-            print("Fuck it")
-
-        if len(data) != (end_offset - offset):
-            print("data problem")
-        # if offset > 546870912:
-        #     print(offset)
-        return data
-
-    def write(self, buffer, offset, write_to_end_of_file):
-        if write_to_end_of_file:
-            offset = self.file_size
-        end_offset = offset + len(buffer)
-        if end_offset > self.file_size:
-            self.set_file_size(end_offset)       
-
-        self.blklst += dedup(bytes(buffer))
-
-        self.allocation_size = self.file_size
-
-        return len(buffer)
-
-    # TODO: Re-implementar CONSTRAINED_WRITE
-    # def constrained_write(self, buffer, offset):
-    #     if offset >= self.file_size:
-    #         return 0
-    #     end_offset = min(self.file_size, offset + len(buffer))
-    #     transferred_length = end_offset - offset
-    #     self.data[offset:end_offset] = buffer[:transferred_length]
-    #     return transferred_length
-
-
-class FolderObj(BaseFileObj):
-    def __init__(self, path, attributes, security_descriptor):
-        super().__init__(path, attributes, security_descriptor)
-        self.allocation_size = 0
-        assert self.attributes & FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY
-
-
-class OpenedObj:
-    def __init__(self, file_obj):
-        self.file_obj = file_obj
-
-    def __repr__(self):
-        return f"{type(self).__name__}:{self.file_obj.file_name}"
-
-
-class VeratyFileSystemOperations(BaseFileSystemOperations):
-    def __init__(self, volume_label, read_only=False, entries=None):
-        super().__init__()
-        if len(volume_label) > 31:
-            raise ValueError("`volume_label` must be 31 characters long max")
-
-        max_file_nodes = 1024
-        max_file_size = partition_size * 1024 * 1024
-        # file_nodes = 1
-
-        # "free_size": (max_file_nodes - file_nodes) * max_file_size,
-
-        self._volume_info = {
-            "total_size": max_file_nodes * max_file_size,
-            "free_size":  (max_file_nodes * max_file_size) - get_usage()[2],
-            "volume_label": volume_label,
-        }
-
-        self.read_only = read_only
-        self._root_path = PureWindowsPath("/")
-        self._root_obj = FolderObj(
-            self._root_path,
-            FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY,
-            SecurityDescriptor.from_string("O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)"),
-        )
-        if entries is None:
-            self._entries = {self._root_path: self._root_obj}
-        else:
-            self._entries = entries
-        self._thread_lock = threading.Lock()
-
-    def get_entries(self):
-        return self._entries
-    # Debugging helpers
-
-    def _create_directory(self, path):
-        path = self._root_path / path
-        obj = FolderObj(
-            path, FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY, self._root_obj.security_descriptor,
-        )
-        self._entries[path] = obj
-
-    def _import_files(self, file_path):
-        file_path = Path(file_path)
-        path = self._root_path / file_path.name
-        obj = FileObj(
-            path, FILE_ATTRIBUTE.FILE_ATTRIBUTE_ARCHIVE, self._root_obj.security_descriptor,
-        )
-        self._entries[path] = obj
-        obj.write(file_path.read_bytes(), 0, False)
-
-    # Winfsp operations
-
-    @operation
-    def get_volume_info(self):
-        return self._volume_info
-
-    @operation
-    def set_volume_label(self, volume_label):
-        self._volume_info["volume_label"] = volume_label
-
-    @operation
-    def get_security_by_name(self, file_name):
-        file_name = PureWindowsPath(file_name)
-
-        # Retrieve file
+def write_small_block_to_disk(swq, stat_msg_queue):
+    while True:
         try:
-            file_obj = self._entries[file_name]
-        except KeyError:
-            raise NTStatusObjectNameNotFound()
+            if not swq.empty():
+                d_hash, d_data = swq.get(False)
+                write_small_block(d_hash, d_data, stat_msg_queue)
+        except:
+            continue
 
-        return (
-            file_obj.attributes,
-            file_obj.security_descriptor.handle,
-            file_obj.security_descriptor.size,
-        )
 
-    @operation
-    def create(
-        self,
-        file_name,
-        create_options,
-        granted_access,
-        file_attributes,
-        security_descriptor,
-        allocation_size,
-    ):
-        if self.read_only:
-            raise NTStatusMediaWriteProtected()
+def write_to_disk(wq, resq, stat_msg_queue):
+    # bytes_total = 0
+    # total_time = 0
+    global datastore
+    ctx = mp.get_context('fork')
 
-        file_name = PureWindowsPath(file_name)
-
-        # `granted_access` is already handle by winfsp
-        # `allocation_size` useless for us
-
-        # Retrieve file
-        try:
-            parent_file_obj = self._entries[file_name.parent]
-            if isinstance(parent_file_obj, FileObj):
-                raise NTStatusNotADirectory()
-        except KeyError:
-            raise NTStatusObjectNameNotFound()
-
-        # File/Folder already exists
-        if file_name in self._entries:
-            raise NTStatusObjectNameCollision()
-
-        if create_options & CREATE_FILE_CREATE_OPTIONS.FILE_DIRECTORY_FILE:
-            file_obj = self._entries[file_name] = FolderObj(
-                file_name, file_attributes, security_descriptor
-            )
-        else:
-            file_obj = self._entries[file_name] = FileObj(
-                file_name, file_attributes, security_descriptor, allocation_size,
-            )
-
-        return OpenedObj(file_obj)
-
-    @operation
-    def get_security(self, file_context):
-        # print(file_context.file_obj.security_descriptor.to_string())
-        return file_context.file_obj.security_descriptor
-
-    @operation
-    def set_security(self, file_context, security_information, modification_descriptor):
-        if self.read_only:
-            raise NTStatusMediaWriteProtected()
-
-        new_descriptor = file_context.file_obj.security_descriptor.evolve(
-            security_information, modification_descriptor
-        )
-        file_context.file_obj.security_descriptor = new_descriptor
-
-    @operation
-    def rename(self, file_context, file_name, new_file_name, replace_if_exists):
-        if self.read_only:
-            raise NTStatusMediaWriteProtected()
-
-        file_name = PureWindowsPath(file_name)
-        new_file_name = PureWindowsPath(new_file_name)
-
-        # Retrieve file
-        try:
-            file_obj = self._entries[file_name]
-
-        except KeyError:
-            raise NTStatusObjectNameNotFound()
-
-        if new_file_name in self._entries:
-            # Case-sensitive comparison
-            if new_file_name.name != self._entries[new_file_name].path.name:
-                pass
-            elif not replace_if_exists:
-                raise NTStatusObjectNameCollision()
-            elif not isinstance(file_obj, FileObj):
-                raise NTStatusAccessDenied()
-
-        for entry_path in list(self._entries):
+    while True:
+        written = 0
+        written_hash = ""
+        last_chunk = ""
+        if not wq.empty():            
             try:
-                relative = entry_path.relative_to(file_name)
-                new_entry_path = new_file_name / relative
-                entry = self._entries.pop(entry_path)
-                entry.path = new_entry_path
-                self._entries[new_entry_path] = entry
+                work = []
+                start = time.time()
+                for i in range(wq.qsize()):                    
+                    try:
+                        q, datastore = wq.get(False)
+                        written = written + len(q.compressed_data)
+                        work.append([q, datastore])
+                    except queue.Empty:
+                        continue
+                if len(work) < 100:
+                    pro = ctx.Process(target=commit.final_commit, args=(work, ))
+                    pro.start()
+                    pro.join()
+                    pro.close()
+                else:
+                    br = len(work)//2
+                    pro = ctx.Process(target=commit.final_commit, args=(work[:br], ))
+                    pro1 = ctx.Process(target=commit.final_commit, args=(work[br:], ))
+                    pro.start()
+                    pro1.start()
+                    pro.join()
+                    pro1.join()
+                    pro.close()                    
+                    pro1.close()
+                
+                stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start)})
+                print(humanbytes(written/(time.time()-start)))
+                # with ctx.Pool(processes=20, maxtasksperchild=10) as pool:
+                #     try:
+                #         pool.map_async(commit.final_commit, (work))
+                #         pool.close()
+                #         pool.join()
+                #         # pool.terminate()
+                #     except:
+                #         print(traceback.format_exc())
+                #         pool.terminate()
+                    # for i in range(0,min(20,wq.qsize())):
+                    #     q, datastore = wq.get(False)                    
+                    #     result = pool.apply_async(commit.final_commit, (q, datastore,))
+                #  xyz = ctx.Process(target=commit.final_commit, args=(q,datastore))
+                #  xyz.start()
+                #  xyz.join()                  
+                # gc.collect()
             except ValueError:
-                continue
+                print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
+                print(traceback.format_exc())
+        else:
+            print("Empty Queue")
+            continue          
 
-    @operation
-    def open(self, file_name, create_options, granted_access):
-        file_name = PureWindowsPath(file_name)
 
-        # `granted_access` is already handle by winfsp
+async def persist(stat_msg_queue):
 
-        # Retrieve file
-        try:
-            file_obj = self._entries[file_name]
-        except KeyError:
-            raise NTStatusObjectNameNotFound()
+    ctx = mp.get_context('fork')
+    
+    wq = ctx.Queue() # Fila de mensagens a serem escritas no disco
+    resq = ctx.Queue() # Fila com as respostas das mensagens escritas
+    swq = ctx.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno
+    wbp = ctx.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
+    wsmbp = ctx.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
+    wbp.start()
+    wsmbp.start()
+    
+    time.sleep(5)
+    last_time = time.time()    
+    while True:
+        if (time.time() - last_time > gc_interval or len(write_buffer) > write_buffer_size) and not write_buffer_lock:    
+            if len(write_buffer) > 0:                
+                await trio.to_thread.run_sync(write_new_blocks, write_buffer, wq, resq, swq, stat_msg_queue)
+            await trio.to_thread.run_sync(garbage_collector, stat_msg_queue)
+            await trio.to_thread.run_sync(persist_data, [inodes, contents], stat_msg_queue)
+            last_time = time.time()
+            gc.collect()
+        await trio.sleep(0.05)
 
-        return OpenedObj(file_obj)
+    wsmbp.join()
+    wsmbp.close()
+    wbp.join()
+    wbp.close()
 
-    @operation
-    def close(self, file_context):
+
+async def usage(stat_msg_queue):
+    mem = virtual_memory()
+
+    time.sleep(1)
+    last_time = time.time()    
+    while True:        
+        if (time.time() - last_time > usage_interval):  
+            await trio.to_thread.run_sync(get_usage, stat_msg_queue)
+            stat_msg_queue.put({'INFO:TOTAL_MEMORY': mem})
+            stat_msg_queue.put({'INFO:Memory (active in use)': unix_memory()})
+            stat_msg_queue.put({'INFO:Memory (resident)': resident()})
+            stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
+
+            if performance_measure_bars:
+                memory_bar_active.reset()
+                memory_bar_active.n = unix_memory() //1024//1024
+                memory_bar_active.refresh()                
+                memory_bar_inactive.reset()
+                memory_bar_inactive.n = resident() //1024//1024
+                memory_bar_inactive.refresh()                
+                memory_bar_statck.reset()
+                memory_bar_statck.n = stacksize() //1024//1024
+                memory_bar_statck.refresh()
+            
+            last_time = time.time()
+        await trio.sleep(1)
+
+
+'''
+
+MAIN PROGRAM
+
+'''
+
+if __name__ == '__main__':
+
+    from functools import partial
+
+    datastore, free_blocks, key_index, hash_table, fs_meta, GC = init_persistance()
+
+    stat_msg_queue = mp.Queue()
+    
+    stat_sender = mp.Process(target=mq_client.send_message, args=(stat_msg_queue, ))
+    stat_sender.start()
+
+    options = parse_args()
+    # init_logging(options.debug)
+    operations = Operations(stat_msg_queue)
+
+    try:
+        os.system("fusermount -u "+options.mountpoint)
+    except:
         pass
 
-    @operation
-    def get_file_info(self, file_context):
-        return file_context.file_obj.get_file_info()
-
-    @operation
-    def set_basic_info(
-        self,
-        file_context,
-        file_attributes,
-        creation_time,
-        last_access_time,
-        last_write_time,
-        change_time,
-        file_info,
-    ) -> dict:
-        if self.read_only:
-            raise NTStatusMediaWriteProtected()
-
-        file_obj = file_context.file_obj
-        if file_attributes != FILE_ATTRIBUTE.INVALID_FILE_ATTRIBUTES:
-            file_obj.attributes = file_attributes
-        if creation_time:
-            file_obj.creation_time = creation_time
-        if last_access_time:
-            file_obj.last_access_time = last_access_time
-        if last_write_time:
-            file_obj.last_write_time = last_write_time
-        if change_time:
-            file_obj.change_time = change_time
-
-        return file_obj.get_file_info()
-
-    @operation
-    def set_file_size(self, file_context, new_size, set_allocation_size):
-        if self.read_only:
-            raise NTStatusMediaWriteProtected()
-
-        if set_allocation_size:
-            file_context.file_obj.set_allocation_size(new_size)
-        else:
-            file_context.file_obj.set_file_size(new_size)
-
-    @operation
-    def can_delete(self, file_context, file_name) -> None:
-        file_name = PureWindowsPath(file_name)
-
-        # Retrieve file
-        try:
-            file_obj = self._entries[file_name]
-        except KeyError:
-            raise NTStatusObjectNameNotFound
-
-        if isinstance(file_obj, FolderObj):
-            for entry in self._entries.keys():
-                try:
-                    if entry.relative_to(file_name).parts:
-                        raise NTStatusDirectoryNotEmpty()
-                except ValueError:
-                    continue
-
-    @operation
-    def read_directory(self, file_context, marker):
-        entries = []
-        file_obj = file_context.file_obj
-
-        # Not a directory
-        if isinstance(file_obj, FileObj):
-            raise NTStatusNotADirectory()
-
-        # The "." and ".." should ONLY be included if the queried directory is not root
-        if file_obj.path != self._root_path:
-            parent_obj = self._entries[file_obj.path.parent]
-            entries.append({"file_name": ".", **file_obj.get_file_info()})
-            entries.append({"file_name": "..", **parent_obj.get_file_info()})
-
-        # Loop over all entries
-        for entry_path, entry_obj in self._entries.items():
-            try:
-                relative = entry_path.relative_to(file_obj.path)
-            # Filter out unrelated entries
-            except ValueError:
-                continue
-            # Filter out ourself or our grandchildren
-            if len(relative.parts) != 1:
-                continue
-            # Add direct chidren to the entry list
-            entries.append({"file_name": entry_path.name, **entry_obj.get_file_info()})
-
-        # Sort the entries
-        entries = sorted(entries, key=lambda x: x["file_name"])
-
-        # No filtering to apply
-        if marker is None:
-            return entries
-
-        # Filter out all results before the marker
-        for i, entry in enumerate(entries):
-            if entry["file_name"] == marker:
-                return entries[i + 1 :]
-
-    @operation
-    def get_dir_info_by_name(self, file_context, file_name):
-        path = file_context.file_obj.path / file_name
-        try:
-            entry_obj = self._entries[path]
-        except KeyError:
-            raise NTStatusObjectNameNotFound()
-
-        return {"file_name": file_name, **entry_obj.get_file_info()}
-
-    @operation
-    def read(self, file_context, offset, length):
-        return file_context.file_obj.read(offset, length)
-
-    @operation
-    def write(self, file_context, buffer, offset, write_to_end_of_file, constrained_io):
-        if self.read_only:
-            raise NTStatusMediaWriteProtected()
-
-        if constrained_io:
-            print("write constrained IO")
-            return file_context.file_obj.constrained_write(buffer, offset)
-        else:
-            return file_context.file_obj.write(buffer, offset, write_to_end_of_file)
-
-    @operation
-    def cleanup(self, file_context, file_name, flags) -> None:
-        debugpy.debug_this_thread()
-        
-        if self.read_only:
-            raise NTStatusMediaWriteProtected()
-
-        # TODO: expose FspCleanupDelete & friends
-        FspCleanupDelete = 0x01
-        FspCleanupSetAllocationSize = 0x02
-        FspCleanupSetArchiveBit = 0x10
-        FspCleanupSetLastAccessTime = 0x20
-        FspCleanupSetLastWriteTime = 0x40
-        FspCleanupSetChangeTime = 0x80
-        file_obj = file_context.file_obj
-
-        # Delete
-        if flags & FspCleanupDelete:
-            # Check for non-empty direcory
-            if any(key.parent == file_obj.path for key in self._entries):
-                return
-
-            # Delete immediately
-            try:
-                for b in file_obj.blklst:
-                    update_index(b.hash, chunk=None, add=False)
-                del self._entries[file_obj.path]
-            except KeyError:
-                raise NTStatusObjectNameNotFound()
-
-        # Resize
-        if flags & FspCleanupSetAllocationSize:
-            file_obj.adapt_allocation_size(file_obj.file_size)
-
-        # Set archive bit
-        if flags & FspCleanupSetArchiveBit and isinstance(file_obj, FileObj):
-            file_obj.attributes |= FILE_ATTRIBUTE.FILE_ATTRIBUTE_ARCHIVE
-
-        # Set last access time
-        if flags & FspCleanupSetLastAccessTime:
-            file_obj.last_access_time = filetime_now()
-
-        # Set last access time
-        if flags & FspCleanupSetLastWriteTime:
-            file_obj.last_write_time = filetime_now()
-
-        # Set last access time
-        if flags & FspCleanupSetChangeTime:
-            file_obj.change_time = filetime_now()
-
-    @operation
-    def overwrite(
-        self, file_context, file_attributes, replace_file_attributes: bool, allocation_size: int
-    ) -> None:
-        if self.read_only:
-            raise NTStatusMediaWriteProtected()
-
-        file_obj = file_context.file_obj
-
-        # File attributes
-        file_attributes |= FILE_ATTRIBUTE.FILE_ATTRIBUTE_ARCHIVE
-        if replace_file_attributes:
-            file_obj.attributes = file_attributes
-        else:
-            file_obj.attributes |= file_attributes
-
-        # Allocation size
-        file_obj.set_allocation_size(allocation_size)
-
-        # Set times
-        now = filetime_now()
-        file_obj.last_access_time = now
-        file_obj.last_write_time = now
-        file_obj.change_time = now
-
-    @operation
-    def flush(self, file_context) -> None:
-        garbage_collector()
-        persist_data(self.get_entries())
-
-
-def create_memory_file_system(mountpoint, label="memfs", verbose=True, debug=False, testing=False, entries=None):
-    if debug:
-        enable_debug_log()
-
-    if verbose:
-        logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-
-    # The avast workaround is not necessary with drives
-    # Also, it is not compatible with winfsp-tests
-    mountpoint = Path(mountpoint)
-    is_drive = mountpoint.parent == mountpoint
-    reject_irp_prior_to_transact0 = not is_drive and not testing
-
-    operations = VeratyFileSystemOperations(label, entries=entries)
-
-    fs = FileSystem(
-        str(mountpoint),
-        operations,
-        sector_size=512,
-        sectors_per_allocation_unit=1,
-        volume_creation_time=filetime_now(),
-        volume_serial_number=0,
-        file_info_timeout=1000,
-        case_sensitive_search=1,
-        case_preserved_names=1,
-        unicode_on_disk=1,
-        persistent_acls=1,
-        post_cleanup_when_modified_only=1,
-        um_file_context_is_user_context2=1,
-        file_system_name=str(mountpoint),
-        prefix="",
-        debug=debug,
-        reject_irp_prior_to_transact0=reject_irp_prior_to_transact0,
-        # security_timeout_valid=1,
-        # security_timeout=10000,
-    )
-    return fs
-
-
-def main(mountpoint, label, verbose, debug, _meta, _datastore, _size, _hash_table, _free_blocks, _key_index, _allocation_unit, _compression_type, _GC):
-    global fs_meta
-    global write_buffer
-    global write_buffer_lifetime
-    global write_buffer_size
-    global allocation_unit
-    global partition_size
-    global lock
-    global compressed_file_system
-    global free_blocks
-    global datastore
-    global key_index
-    global hash_table
-    global write_buffer_lock
-    global GC
-    global gc_path
-
-    if _compression_type is not None:
-        compressed_file_system = _compression_type
-
+    fuse_options = set(pyfuse3.default_options)
+    fuse_options.add('fsname=VeratyFS')
+    fuse_options.discard('default_permissions')
+    # if options.debug_fuse:
+    #     fuse_options.add('debug')    
+    pyfuse3.init(operations, options.mountpoint, fuse_options)
+    
     try:
-        partition_size = _size
-        allocation_unit = _allocation_unit
-        datastore, free_blocks, key_index, hash_table, fs_meta = init_persistance(fs_meta, _key_index, _datastore, _hash_table, _free_blocks, _size, _GC)
-
-    except Exception:
+        par = partial(parent, stat_msg_queue=stat_msg_queue)
+        trio.run(par)    
+    except:
+        pyfuse3.close(unmount=False)
         print(traceback.format_exc())
-        print("Error initializing persistance. Please check file names and paths provided")
-        sys.exit(-1)
+        print("TODO: REDO THAT FOR MP - Persisting remaining data...")
+        # if len(write_buffer) > 0 and not write_buffer_lock:
+        #     pass
+        # persist_data([inodes, contents], stat_msg_queue)
+        
+        # os.system("fusermount -u "+options.mountpoint)
+        stat_sender.join(2)
+        stat_sender.kill()
+        
 
-    fs = create_memory_file_system(mountpoint, label, verbose, debug, entries=fs_meta)
-
-    try:
-        print("Max Partition Size:" + humanbytes(sys.maxsize))
-        print("Max File size: " + humanbytes(sys.maxsize//2))
-        # '8388608.00 TB'
-        print("Starting FS")
-        fs.start()
-        print("FS started, keep it running forever")
-
-        last_gc = time.time()
-        last_commit = time.time()
-        persist_data(fs.operations.get_entries())
-        while True:
-            if time.time() - last_commit > write_buffer_lifetime+5 and not write_buffer_lock:
-                write_new_blocks(write_buffer)
-                garbage_collector()
-                persist_data(fs.operations.get_entries())
-                last_commit = time.time()
-                time.sleep(5)                
-
-            if time.time() - last_gc > gc_interval:
-                print("Used Memory:" + humanbytes(memory()))
-                get_usage()                
-
-                # with futures.ThreadPoolExecutor(max_workers=3) as executor:
-                #     executor.submit(get_usage, allocation_unit, len(hash_table))
-                #     executor.submit(memory)
-                #     executor.submit(persist_data, fs.operations.get_entries())
-
-
-                # persist_data(fs.operations.get_entries())
-                # u, d = get_usage()
-                # mem = memory()
-                # print("-------------------")
-                #
-                # print("Used Memory:" + humanbytes(mem))
-                last_gc = time.time()
-
-                # usage = mp.Process(target=get_usage, args=())
-                # usage.start()
-                # usage.join()
-    except KeyboardInterrupt:
-        print("Finalizing File System. Please wait...")
-        print("Writing Pending Data...", end='')
-        if not write_buffer_lock:
-            write_new_blocks(write_buffer)
-            garbage_collector()
-            persist_data(fs.operations.get_entries())
-        else:
-            while write_buffer_lock:
-                print(".", end='')
-                time.sleep(1)
-        print('.')
-        print('Persisting Metadata....')
-        persist_data(fs.operations.get_entries())
-
-    finally:
-        print("Stopping FS")
-        fs.stop()
-        print("FS stopped")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("mountpoint")
-    parser.add_argument("-v", "--verbose", action="store_true")
-    parser.add_argument("-d", "--debug", action="store_true")
-    parser.add_argument("-l", "--label", type=str, default="VeratyFS")
-    parser.add_argument("-m", "--meta", type=str, default=None)
-    parser.add_argument("-t", "--datastore", type=str, default=None)
-    parser.add_argument("-s", "--size", type=int, default=partition_size)  # Size in GB
-    parser.add_argument("-k", "--keys", type=str, default=None)
-    parser.add_argument("-a", "--hash", type=str, default=None)
-    parser.add_argument("-f", "--free_blocks", type=str, default=None)
-    parser.add_argument("-u", "--allocation_unit", type=int, default=allocation_unit)  # Allocation Unit in Bytes
-    parser.add_argument("-c", "--compression_type", type=str, default=None)
-    parser.add_argument("-g", "--garbage_collector", type=str, default=None)
-    args = parser.parse_args()
-    main(args.mountpoint, args.label, args.verbose, args.debug, args.meta, args.datastore, args.size, args.hash,
-         args.free_blocks, args.keys, args.allocation_unit, args.compression_type, args.garbage_collector)
+    pyfuse3.close()

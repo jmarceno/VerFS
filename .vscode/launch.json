@@ -8,7 +8,7 @@
             "name": "VeratyFS Debug",
             "type": "python",
             "request": "launch",
-            "program": "VeratyFS_Fuse.py",
+            "program": "VeratyFS.py",
             "console": "integratedTerminal",
             "args": [                
                 "/home/jardel/fsteste"
