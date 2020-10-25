@@ -67,10 +67,11 @@ fs_meta_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "fs.meta")
 hash_table_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "hash_table.bin")
 free_blocks_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "free_blocks.bin")
 gc_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "gc.vfs")
+small_block_db_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "small_blocks.sqlite")
 
 datastore_base_path = os.path.join(os.getcwd(), '..', '..', 'metadata')
 datastore_chunks = list(range(0, datastore_chunks_number))
 
 identity_string = b'VeratyFS@v0.0.1@InLineDedup,FixedStoreSize,GC,Compression,FixedBlockSize\n'
 
-q_random = 100 # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue
+q_random = 2 # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue

@@ -689,7 +689,7 @@ def garbage_collector(stat_msg_queue):
             if performance_measure_bars:
                 GC_bar.update(1)
             else:
-                if random.randrange(1,q_random) == 1:
+                if random.randrange(1,q_rand) == 1:
                     stat_msg_queue.put({'INFO:GCProgress' : str((len(GC.add_uses) + len(GC.remove_uses)))})
 
     except IndexError:
@@ -880,9 +880,9 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
     if registers_processed > 0:
         if performance_measure_bars:
             write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
-        else:
-            if random.randrange(1,q_random) == 1:
-                stat_msg_queue.put({'INFO:WriteSpeed' : bytes_processed/(time.time()-start_time)})
+        # else:
+        #     if random.randrange(1,q_random) == 1:
+        stat_msg_queue.put({'INFO:WriteSpeed' : bytes_processed/(time.time()-start_time)})
             # print(humanbytes(bytes_processed/(time.time()-start_time))+" /s")
         # pass
         # print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")

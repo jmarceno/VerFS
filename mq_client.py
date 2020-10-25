@@ -16,7 +16,10 @@ def send_message(stat_msg_queue):
     socket = context.socket(zmq.REQ)
 
     while True:
-        msg = stat_msg_queue.get()        
+        msg = stat_msg_queue.get()
+        # if stat_msg_queue.qsize() > 1000:
+        #     for i in range(1000):
+        #         stat_msg_queue.get()
         if type(msg) != dict:
             msg = 'Wrong data type: message provided to client was not a dict'            
         try:

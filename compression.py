@@ -23,7 +23,7 @@ compression_trigger = 0.8  # How much the data has to be compressed for it to be
 
 
 # Pickle a file and then compress it into a file with extension
-def compressed_pickle(path, data, format=1, stat_msg_queue=None):
+def compressed_pickle(path, data, format=4, stat_msg_queue=None):
     """
 
     :param path:
@@ -53,8 +53,8 @@ def compressed_pickle(path, data, format=1, stat_msg_queue=None):
         else:
             n_data = data        
         try:
-            with os.open(path, 'w') as f:
-                cPickle.dump(n_data, f)
+            with open(path, 'wb') as f:
+                pickle.dump(n_data, f)
                 return True
         except RuntimeError:
             return False
@@ -62,7 +62,7 @@ def compressed_pickle(path, data, format=1, stat_msg_queue=None):
 
 
 # Load any compressed pickle file
-def decompress_pickle(_file, format=1, stat_msg_queue=None):
+def decompress_pickle(_file, format=4, stat_msg_queue=None):
     """
 
     :param file:
@@ -78,9 +78,9 @@ def decompress_pickle(_file, format=1, stat_msg_queue=None):
     elif format == 3:
         raise NotImplementedError
     elif format == 4:
-        with os.open(_file, mode='r') as f:
+        with open(_file, mode='r') as f:
             data = f.read()
-            return cPickle.load(data)
+            return pickle.load(data)
 
 
 def compress_data(data, _format=1, stat_msg_queue=None):
