@@ -12,6 +12,10 @@ VeratyFS File System
 - Cloud Sync and Mount
 - Posix Compliant
 '''
+# import tracemalloc
+
+# tracemalloc.start()
+
 import os
 import sys
 import multiprocessing as mp
@@ -64,21 +68,22 @@ import commit
 # datastore, free_blocks, key_index, hash_table, fs_meta, GC = init_persistance()
 
 write_buffer_lock = False
+LOCKED_WRITE = False
 
 if performance_measure_bars:
     from progress_bars import space_bar_compression_rate, space_bar_free_space, space_bar_savings, write_bar, dedup_bar, space_bar_over_used
     from progress_bars import space_bar_used, frag_bar_blocks, frag_bar_space, memory_bar_active, memory_bar_inactive, memory_bar_statck, GC_bar
 
-try:
-    if fs_meta[0] is not None:
-        inodes = fs_meta[0]
-        contents = fs_meta[1]
-    else:
-        inodes = inodes
-        contents = contents
-except:
-        inodes = inodes
-        contents = contents
+# try:
+#     if fs_meta[0] is not None:
+#         inodes = fs_meta[0]
+#         contents = fs_meta[1]
+#     else:
+#         inodes = inodes
+#         contents = contents
+# except:
+#         inodes = inodes
+#         contents = contents
 
 try:
     import faulthandler
@@ -111,8 +116,7 @@ class Operations(pyfuse3.Operations):
         
         self.inode_open_count = defaultdict(int)
         self.stat_msg_queue = stat_msg_queue
-        
-        
+                
         try:
             if fs_meta is not None and fs_meta[0] is None or fs_meta[1] is None:
                 self.inodes = inodes
@@ -124,8 +128,7 @@ class Operations(pyfuse3.Operations):
         except TypeError:
             self.inodes = inodes
             self.contents = contents
-            self.init_file_system()
-            
+            self.init_file_system()           
 
 
     def init_file_system(self):
@@ -534,6 +537,13 @@ class Operations(pyfuse3.Operations):
         inodes = self.inodes    # Coloca os dados do FS de volta na memória compartilhada para pode ser acessada e persistida
         contents = self.contents    #TODO: TROCAR A FORMA DE USO PARA NAO PRECISAR MANTER 2 VARIAVEIS NA MEMORIA
         
+        # snapshot = tracemalloc.take_snapshot()
+        # top_stats = snapshot.statistics('lineno', cumulative=True)
+        # os.system('clear')
+        # print("[ Top 10 ]")
+        # for stat in top_stats[:20]:
+        #     print(stat)
+
         return len(buf)
 
     async def release(self, fh):
@@ -776,7 +786,6 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
         if performance_measure_bars and write_bar.n > write_bar.total:
             write_bar.reset()
             write_bar.total = write_bar.total + wq.qsize() + swq.qsize()
-            # write_bar.total = write_bar.total + len(write_buffer)           
             write_bar.refresh()
 
         try:            
@@ -869,6 +878,7 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
                 if performance_measure_bars:
                     write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
                     write_bar.update(1)
+            del q
 
         except IndexError:
             writing = False
@@ -886,6 +896,7 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
         # pass
         # print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
         # print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")    
+    
 
 
 def dedup(data, stat_msg_queue):    
@@ -905,9 +916,8 @@ def dedup(data, stat_msg_queue):
         if type(data) == bytes:
             data = bytearray(data)
         
-        ch = variable_chunks(data)        
+        ch = variable_chunks(data)
         if performance_measure_bars:
-            # dedup_bar.reset()
             dedup_bar.total = len(ch) + dedup_bar.total
             dedup_bar.refresh()
         for c in ch:            
@@ -918,20 +928,7 @@ def dedup(data, stat_msg_queue):
                 update_index(c.hash)
             else:
                 done = False
-                # for q in queued_writes:   #  Verify if this block has already been processed in this batch
-                #     if q.hash == c.hash:
-                #         blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
-                #         GC.add_uses.append(c.hash)                        
-                #         done = True                        
-                #         break
-                # # wb = write_buffer.copy()
-                # for w in write_buffer:   #  Verify if this block is already in the write queue to be writtn
-                #     if w.hash == c.hash:
-                #         blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
-                #         GC.add_uses.append(c.hash)                        
-                #         done = True
-                #         break
-                # # del wb
+                
                 if not done:
                     q = QueuedWrite(len(blk_list)-1, c.hash, c.data)
                     blk_list[q.idx] = FileBlock(q.hash, len(c.data))
@@ -941,7 +938,7 @@ def dedup(data, stat_msg_queue):
 
             if performance_measure_bars:
                 dedup_bar.update(1)                
-                # dedup_bar.refresh()
+        del ch
     else:
         print("Value Error when preparing writes")
         print(traceback.format_exc())
@@ -952,6 +949,11 @@ def dedup(data, stat_msg_queue):
     else:
         if random.randrange(1,q_random) == 1:
             stat_msg_queue.put({'INFO:DedupSpeed' : bytes_processed/ (time.time()- start_time)})
+        
+    del queued_writes
+    del start_time
+    del bytes_processed
+    
     return blk_list
 
 
@@ -1028,8 +1030,10 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                         else:
                             decompresed_data = d
 
-                        read_cache[_hash] = decompresed_data                        
+                        read_cache[_hash] = decompresed_data                                                
+                        mm.madvise(mmap.MADV_DONTNEED)
                         mm.close()
+                        del mm
                     
                     d = decompresed_data
 
@@ -1045,8 +1049,18 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                 bytes_processed = bytes_processed + len(d)
     if random.randrange(1,q_random) == 1:
         stat_msg_queue.put({'INFO:ReadSpeed' : str(bytes_processed/ (time.time()- start_time))})
-    
-        
+    try:
+        del data
+        del cached
+        del r    
+        del start_time
+        del bytes_processed
+        del d
+        del idx
+        del b
+    except:
+        pass
+
     return data
 
 
@@ -1131,82 +1145,64 @@ def write_small_block_to_disk(swq, stat_msg_queue):
             if not swq.empty():
                 d_hash, d_data = swq.get(False)
                 write_small_block(d_hash, d_data, stat_msg_queue)
+                del d_data
+                del d_hash
         except:
             continue
 
 
 def write_to_disk(wq, resq, stat_msg_queue):
-    # bytes_total = 0
-    # total_time = 0
-    global datastore
-    ctx = mp.get_context('fork')
 
     while True:
         written = 0
-        written_hash = ""
-        last_chunk = ""
-        if not wq.empty():            
-            try:
-                work = []
-                start = time.time()
-                for i in range(wq.qsize()):                    
-                    try:
-                        q, datastore = wq.get(False)
-                        written = written + len(q.compressed_data)
-                        work.append([q, datastore])
-                    except queue.Empty:
-                        continue
-                if len(work) < 100:
-                    pro = ctx.Process(target=commit.final_commit, args=(work, ))
-                    pro.start()
-                    pro.join()
-                    pro.close()
-                else:
-                    br = len(work)//2
-                    pro = ctx.Process(target=commit.final_commit, args=(work[:br], ))
-                    pro1 = ctx.Process(target=commit.final_commit, args=(work[br:], ))
-                    pro.start()
-                    pro1.start()
-                    pro.join()
-                    pro1.join()
-                    pro.close()                    
-                    pro1.close()
+        bytes_written = 0
+        start = time.time()        
+        if not wq.empty():
+            try:                
+                q, datastore = wq.get(False)
                 
-                stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start)})
-                print(humanbytes(written/(time.time()-start)))
-                # with ctx.Pool(processes=20, maxtasksperchild=10) as pool:
-                #     try:
-                #         pool.map_async(commit.final_commit, (work))
-                #         pool.close()
-                #         pool.join()
-                #         # pool.terminate()
-                #     except:
-                #         print(traceback.format_exc())
-                #         pool.terminate()
-                    # for i in range(0,min(20,wq.qsize())):
-                    #     q, datastore = wq.get(False)                    
-                    #     result = pool.apply_async(commit.final_commit, (q, datastore,))
-                #  xyz = ctx.Process(target=commit.final_commit, args=(q,datastore))
-                #  xyz.start()
-                #  xyz.join()                  
-                # gc.collect()
+                with open(datastore[q.chunk].path, "r+b") as f:
+                    mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
+                    mm.seek(q.block)
+                    if q.compressed:                            
+                        written = mm.write(q.compressed_data)
+                        # written_hash = hash_data(q.compressed_data)
+                    else:                            
+                        written = mm.write(q.data)
+                        # written_hash = hash_data(q.data)
+
+                    # if not q.compressed and written_hash != q.hash:
+                    #     print("Data corruption - Hash inconsistance")
+
+                    # elif q.compressed and written_hash != hash_data(q.compressed_data):
+                    #     print("Data corruption - Hash inconsistance")
+                    mm.madvise(mmap.MADV_DONTNEED)
+                    mm.close()
+                    del mm
+                del q
+                del datastore
             except ValueError:
                 print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
                 print(traceback.format_exc())
+            except queue.Empty:
+                continue
+            if random.randrange(0,3) == 0:
+                stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start)})
         else:
-            print("Empty Queue")
-            continue          
-
+            del written
+            del bytes_written
+            continue
+    
 
 async def persist(stat_msg_queue):
 
-    ctx = mp.get_context('fork')
-    
-    wq = ctx.Queue() # Fila de mensagens a serem escritas no disco
-    resq = ctx.Queue() # Fila com as respostas das mensagens escritas
-    swq = ctx.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno
-    wbp = ctx.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
-    wsmbp = ctx.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
+    # ctx = mp.get_context('fork')
+        
+    wq = mp.Queue() # Fila de mensagens a serem escritas no disco
+    resq = mp.Queue() # Fila com as respostas das mensagens escritas
+    swq = mp.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno
+    wbp = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
+    wsmbp = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
     wbp.start()
     wsmbp.start()
     
@@ -1222,10 +1218,12 @@ async def persist(stat_msg_queue):
             gc.collect()
         await trio.sleep(0.05)
 
-    wsmbp.join()
+    wsmbp.join(timeout=5)    
+    wbp.join(timeout=5)
     wsmbp.close()
-    wbp.join()
     wbp.close()
+    wsmbp.kill()
+    wbp.kill()
 
 
 async def usage(stat_msg_queue):
@@ -1253,7 +1251,7 @@ async def usage(stat_msg_queue):
                 memory_bar_statck.refresh()
             
             last_time = time.time()
-        await trio.sleep(1)
+        await trio.sleep(30)
 
 
 '''
@@ -1303,6 +1301,5 @@ if __name__ == '__main__':
         # os.system("fusermount -u "+options.mountpoint)
         stat_sender.join(2)
         stat_sender.kill()
-        
-
-    pyfuse3.close()
+    finally:
+        pyfuse3.close()
