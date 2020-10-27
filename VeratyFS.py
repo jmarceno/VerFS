@@ -734,6 +734,9 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
     while writing:
         try:            
             q = write_buffer.popleft()
+            q.data = bytearray(q.data)
+            q.compressed_data = bytearray(q.compressed_data)
+
             if not q.result and q.hash not in hash_table:
                 try:
                     if len(q.compressed_data) <= min_blk_size:
@@ -848,7 +851,7 @@ def dedup(data, stat_msg_queue):
 
     if type(data) == bytearray or type(data) == bytes or type(data) == memoryview:
         if type(data) != bytearray:
-            data = bytearray(data)
+            data = memoryview(data)
         
         if len(data) <= min_blk_size:
             _hashed_data = hash_data(data)
@@ -862,6 +865,7 @@ def dedup(data, stat_msg_queue):
                 write_read_cache[_hashed_data] = data
                 write_buffer.append(q)
                 bytes_processed = bytes_processed + len(data)
+                del q
         else:
             ch = variable_chunks(data)
             for c in ch:
@@ -875,6 +879,7 @@ def dedup(data, stat_msg_queue):
                     blk_list[q.idx] = FileBlock(c.hash, len(c.data))
                     write_read_cache[c.hash] = c.data
                     write_buffer.append(q)
+                    del q
 
                 bytes_processed = bytes_processed + len(c.data)
 
@@ -1128,20 +1133,20 @@ async def persist(stat_msg_queue):
     resq = mp.Queue() # Fila com as respostas das mensagens escritas
     swq = mp.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno
     wbp = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
-    # wbp2 = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
-    # wbp3 = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
+    wbp2 = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
+    wbp3 = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
 
     wsmbp = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
-    # wsmbp2 = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
-    # wsmbp3 = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
+    wsmbp2 = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
+    wsmbp3 = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
 
     wbp.start()
-    # wbp2.start()
-    # wbp3.start()
+    wbp2.start()
+    wbp3.start()
     
     wsmbp.start()
-    # wsmbp2.start()
-    # wsmbp3.start()
+    wsmbp2.start()
+    wsmbp3.start()
     
     time.sleep(5)
     last_time = time.time()    
