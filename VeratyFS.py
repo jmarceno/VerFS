@@ -1092,40 +1092,53 @@ def write_to_disk(wq, resq, stat_msg_queue):
         start = time.time()        
         if not wq.empty():
             try:
-                next_q = None
-                next_datastore = None
+                # next_q = None
+                # next_datastore = None
                 
-                work = []
+                # work = []
 
-                this_q, this_datastore = wq.get(False)                
-                work.append((this_q, this_datastore))
+                q, datastore = wq.get(False)                
+                # work.append((this_q, this_datastore))
 
-                for i in range(0, 200):
-                    if wq.qsize() > 1:
-                        next_q, next_datastore = wq.get(False)
-                        if next_q.chunk == this_q.chunk:
-                            work.append((next_q, next_datastore))
-                            this_q = next_q
-                            this_datastore = next_datastore
-                        else:
-                            wq.put_nowait((next_q, next_datastore))
-                            break
+                # for i in range(0, 200):
+                #     if wq.qsize() > 1:
+                #         next_q, next_datastore = wq.get(False)
+                #         if next_q.chunk == this_q.chunk:
+                #             work.append((next_q, next_datastore))
+                #             this_q = next_q
+                #             this_datastore = next_datastore
+                #         else:
+                #             # wq.put_nowait((next_q, next_datastore))
+                #             break
                 
-                with open(this_datastore[this_q.chunk].path, "r+b") as f:
-                    mm = mmap.mmap(f.fileno(), length=this_datastore[this_q.chunk].size, access=mmap.ACCESS_WRITE)
-                    for q, datastore in work:                    
-                        mm.seek(q.block)
-                        if q.compressed:                            
-                            written = written + mm.write(q.compressed_data)                        
-                        else:                            
-                            written = written + mm.write(q.data)                        
-                    mm.madvise(mmap.MADV_DONTNEED)
+                with open(datastore[q.chunk].path, "r+b") as f:
+                    mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
+                    # for q, datastore in work:                    
+                    mm.seek(q.block)
+                    if q.compressed:                            
+                        written = written + mm.write(q.compressed_data)                        
+                    else:                            
+                        written = written + mm.write(q.data)                        
+                    mm.madvise(mmap.MADV_DONTNEED)                    
                     mm.close()
-                    del mm
+                    # del mm
+                    # del q
+                    # del datastore
                     del q
                     del datastore
-                    del this_q
-                    del this_datastore
+
+                    # if next_q is not None:
+                # with open(next_datastore[next_q.chunk].path, "r+b") as f:
+                #     mm = mmap.mmap(f.fileno(), length=next_datastore[next_q.chunk].size, access=mmap.ACCESS_WRITE)                    
+                #     mm.seek(next_q.block)
+                #     if next_q.compressed:                            
+                #         written = written + mm.write(next_q.compressed_data)                        
+                #     else:                            
+                #         written = written + mm.write(next_q.data)                        
+                #     mm.madvise(mmap.MADV_DONTNEED)                    
+                #     mm.close()
+
+                #     del mm
                 
             except ValueError:
                 print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
