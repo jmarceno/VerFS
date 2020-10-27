@@ -432,7 +432,7 @@ class Operations(pyfuse3.Operations):
         
         return await self.getattr(inode)
 
-    # file_read_fuse
+    
     async def read(self, fh, offset, length):
         # debugpy.debug_this_thread()
         f = None
@@ -511,8 +511,7 @@ class Operations(pyfuse3.Operations):
             data = b''
 
         return data
-
-    # _file_write_fuse    
+    
     async def write(self, fh, offset, buf):
         # debugpy.debug_this_thread()
         buf = memoryview(buf)
@@ -637,7 +636,7 @@ def garbage_collector(stat_msg_queue):
             hash_table[remove].uses = hash_table[remove].uses - 1
             if hash_table[remove].uses <= 0:
                 hash_table[remove].DELETED = True
-                if hash_table[remove].size <= min_blk_size:
+                if hash_table[remove].size <= small_block_limit:
                     r = delete_small_block(remove, stat_msg_queue)
                     if not r:
                         print("DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete.")                
@@ -736,7 +735,7 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
             q = write_buffer.popleft()
             if not q.result and q.hash not in hash_table:
                 try:
-                    if len(q.compressed_data) <= min_blk_size:
+                    if len(q.compressed_data) <= small_block_limit:
                         if q.compressed:                            
                             swq.put((q.hash, q.compressed_data))                                                        
                             q.chunk = -1                            
@@ -789,7 +788,7 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
                     hash_table[q.hash].compressed = q.compressed
                     update_index(q.hash, q.chunk, True, stat_msg_queue)
 
-                    if len(q.compressed_data) <= min_blk_size:
+                    if len(q.compressed_data) <= small_block_limit:
                         small_block_read_cache[q.hash] = q.data
 
                     try:
@@ -812,7 +811,7 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
                     bytes_processed = bytes_processed + len(q.compressed_data)
                 else:
                     bytes_processed = bytes_processed + len(q.data)                
-            # del q
+            del q
 
         except IndexError:
             writing = False
@@ -847,7 +846,7 @@ def dedup(data, stat_msg_queue):
     bytes_processed = 0
 
     if type(data) == bytearray or type(data) == bytes or type(data) == memoryview:
-        if type(data) != bytearray:
+        if type(data) != memoryview:
             data = bytearray(data)
         
         if len(data) <= min_blk_size:
@@ -857,7 +856,7 @@ def dedup(data, stat_msg_queue):
                 blk_list[len(blk_list)-1] = FileBlock(_hashed_data, len(data))
                 update_index(_hashed_data)
             else:                
-                q = QueuedWrite(len(blk_list)-1, _hashed_data, data)
+                q = QueuedWrite(len(blk_list)-1, _hashed_data, bytearray(data))
                 blk_list[q.idx] = FileBlock(_hashed_data, len(data))
                 write_read_cache[_hashed_data] = data
                 write_buffer.append(q)
@@ -871,7 +870,7 @@ def dedup(data, stat_msg_queue):
                     blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
                     update_index(c.hash)
                 else:                
-                    q = QueuedWrite(len(blk_list)-1, c.hash, c.data)
+                    q = QueuedWrite(len(blk_list)-1, c.hash, bytearray(c.data))
                     blk_list[q.idx] = FileBlock(c.hash, len(c.data))
                     write_read_cache[c.hash] = c.data
                     write_buffer.append(q)
@@ -1086,38 +1085,59 @@ def write_small_block_to_disk(swq, stat_msg_queue):
 
 
 def write_to_disk(wq, resq, stat_msg_queue):
+
     while True:
         written = 0
         bytes_written = 0
         start = time.time()        
         if not wq.empty():
-            try:                
-                q, datastore = wq.get(False)
+            try:
+                next_q = None
+                next_datastore = None
                 
-                with open(datastore[q.chunk].path, "r+b") as f:
-                    mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
-                    mm.seek(q.block)
-                    if q.compressed:                            
-                        written = mm.write(q.compressed_data)
-                        # written_hash = hash_data(q.compressed_data)
-                    else:                            
-                        written = mm.write(q.data)
-                        # written_hash = hash_data(q.data)
+                work = []
 
-                    # if not q.compressed and written_hash != q.hash:
-                    #     print("Data corruption - Hash inconsistance")
+                this_q, this_datastore = wq.get(False)                
+                work.append((this_q, this_datastore))
 
-                    # elif q.compressed and written_hash != hash_data(q.compressed_data):
-                    #     print("Data corruption - Hash inconsistance")
+                for i in range(0, 200):
+                    if wq.qsize() > 1:
+                        next_q, next_datastore = wq.get(False)
+                        if next_q.chunk == this_q.chunk:
+                            work.append((next_q, next_datastore))
+                            this_q = next_q
+                            this_datastore = next_datastore
+                        else:
+                            wq.put_nowait((next_q, next_datastore))
+                            break
+                
+                with open(this_datastore[this_q.chunk].path, "r+b") as f:
+                    mm = mmap.mmap(f.fileno(), length=this_datastore[this_q.chunk].size, access=mmap.ACCESS_WRITE)
+                    for q, datastore in work:                    
+                        mm.seek(q.block)
+                        if q.compressed:                            
+                            written = written + mm.write(q.compressed_data)                        
+                        else:                            
+                            written = written + mm.write(q.data)                        
                     mm.madvise(mmap.MADV_DONTNEED)
                     mm.close()
                     del mm
-                del q
-                del datastore
+                    del q
+                    del datastore
+                    del this_q
+                    del this_datastore
+                
+            except ValueError:
+                print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
+                print(traceback.format_exc())
             except queue.Empty:
-                pass
-            except:
-                pass
+                continue
+            # if random.randrange(0,3) == 0:
+            stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start)})
+        else:
+            del written
+            del bytes_written
+            continue
     
 
 async def persist(stat_msg_queue):
