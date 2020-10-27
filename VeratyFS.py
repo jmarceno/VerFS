@@ -60,19 +60,11 @@ from persistence import init_persistance, persist_data
 from stats import unix_memory, resident, stacksize
 import mq_client
 
-# from tqdm.asyncio import trange, tqdm
-import tqdm
-
-import commit
-
 # datastore, free_blocks, key_index, hash_table, fs_meta, GC = init_persistance()
 
 write_buffer_lock = False
 LOCKED_WRITE = False
 
-if performance_measure_bars:
-    from progress_bars import space_bar_compression_rate, space_bar_free_space, space_bar_savings, write_bar, dedup_bar, space_bar_over_used
-    from progress_bars import space_bar_used, frag_bar_blocks, frag_bar_space, memory_bar_active, memory_bar_inactive, memory_bar_statck, GC_bar
 
 # try:
 #     if fs_meta[0] is not None:
@@ -160,9 +152,9 @@ class Operations(pyfuse3.Operations):
         elif str(b'.Trash') in str(name):
             raise(pyfuse3.FUSEError(errno.ENOENT))
         else:
-            try:
+            try:                
                 for i in self.contents:
-                    if self.contents[i].parent_inode ==  inode_p and self.contents[i].name == name:
+                    if self.contents[i].name == name and self.contents[i].parent_inode ==  inode_p:
                         inode = self.contents[i].inode
                         break                        
             except TypeError:                
@@ -201,6 +193,8 @@ class Operations(pyfuse3.Operations):
             entry.st_atime_ns = f.atime_ns
             entry.st_mtime_ns = f.mtime_ns
             entry.st_ctime_ns = f.ctime_ns
+
+            del f
         except KeyError:
             raise (pyfuse3.FUSEError(errno.ENOENT))
 
@@ -215,9 +209,10 @@ class Operations(pyfuse3.Operations):
 
     async def readdir(self, inode, off, token):
         dir_entries = []
-        for d in self.contents:
-            if self.contents[d].parent_inode == inode:
-                dir_entries.append(self.contents[d])
+        [dir_entries.append(self.contents[x]) for x in self.contents if self.contents[x].parent_inode == inode]
+        # for d in self.contents:
+        #     if self.contents[d].parent_inode == inode:
+        #         dir_entries.append(self.contents[d])
 
         try:
             pyfuse3.readdir_reply(token, dir_entries[off].name, await self.getattr(dir_entries[off].inode), off+1)
@@ -441,9 +436,11 @@ class Operations(pyfuse3.Operations):
     async def read(self, fh, offset, length):
         # debugpy.debug_this_thread()
         f = None
+
         for i in list(self.inodes.keys()):
             if self.inodes[i].id == fh:
                 f = self.inodes[i]
+                break
 
         if len(self.inodes[fh].data) == 0:
             data = b''
@@ -504,20 +501,20 @@ class Operations(pyfuse3.Operations):
                         data = data[:-end_diff]
 
             if data == b'':
-                print("Fuck it")
+                print("Returning Empty data @ [async def read]. Is this intended?")
 
             if len(data) != (end_offset - offset):
-                print("data problem")
+                print("Returning wrong length data @ [async def read]. Is this intended?")
             return data
 
         if data is None:
             data = b''
 
         return data
-
     
     async def write(self, fh, offset, buf):
         # debugpy.debug_this_thread()
+        buf = memoryview(buf)
         f = None
         for i in list(self.inodes.keys()):
             if self.inodes.get(i).id == fh:
@@ -528,7 +525,7 @@ class Operations(pyfuse3.Operations):
         if end_offset > f.size:
             f.size = end_offset #TODO: SETAR TAMANHO DO ARQUIVO DE FORMA CORRETA
 
-        f.data += dedup(bytes(buf), self.stat_msg_queue)
+        f.data += dedup(buf, self.stat_msg_queue)
         
         self.inodes[fh].data = f.data
         self.inodes[fh].size = f.size
@@ -604,55 +601,16 @@ def get_usage(stat_msg_queue):
     if undeduped_compressed != 0 and undeduped_uncompressed != 0:
         compression_rate = undeduped_compressed/undeduped_uncompressed
     
-    if performance_measure_bars:
-        space_bar_used.reset()
-        space_bar_used.n = min((deduped_compressed //1024//1024), (partition_size_gb//1024//1024))
-        space_bar_used.refresh()
-
-        space_bar_savings.reset()
-        space_bar_savings.n = ((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed - deduped_compressed))//1024//1024
-        space_bar_savings.refresh()
-
-        compbar = (1 - compression_rate)
-        if compbar == 1:
-            compbar = 0
-
-        space_bar_compression_rate.reset()
-        space_bar_compression_rate.n = max(0.0, round(compbar*100, 3))
-        space_bar_compression_rate.refresh()
-
-        space_bar_free_space.reset()
-        space_bar_free_space.n = max(0,(partition_size_gb - (deduped_compressed)) //1024//1024)
-        space_bar_free_space.refresh()
-
-        space_bar_over_used.reset()
-        space_bar_over_used.n = max(0, (deduped_compressed //1024//1024) - (partition_size_gb//1024//1024))
-        space_bar_over_used.refresh()
-
-        frag_bar_space.reset()
-        frag_bar_space.n = max(0, fragmentation['free_size'] //1024//1024)
-        frag_bar_space.refresh()
-
-        frag_bar_blocks.reset()
-        frag_bar_blocks.n = fragmentation['free_count'] 
-        frag_bar_blocks.refresh()
-
-    else:
-        stat_msg_queue.put({'STAT:TOTAL_SIZE':partition_size_gb})
-        stat_msg_queue.put({'STAT:Undeduped (No Compression) Space Used':undeduped_uncompressed})        
-        stat_msg_queue.put({'STAT:Free Space': (max(0,(partition_size_gb - (deduped_compressed))))})
-        stat_msg_queue.put({'STAT:Undeduped (Compression) Space Used':undeduped_compressed})
-        stat_msg_queue.put({'STAT:Deduped (Compression) Space Used':deduped_compressed})
-        stat_msg_queue.put({'STAT:Compression Rate':1 - compression_rate})
-        stat_msg_queue.put({'STAT:Total Savings':(undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)})
-        stat_msg_queue.put({'STAT:Fragmentation':max(0, fragmentation['free_size'])})
-        stat_msg_queue.put({'STAT:Fragmented Blocks':fragmentation['free_count']})
     
-    # print("Undeduped (No Compression) Space Used : " + humanbytes(undeduped_uncompressed))
-    # print("Undeduped (Compression) Space Used : " + humanbytes(undeduped_compressed))
-    # print("Deduped (Compression) Space Used : " + humanbytes(deduped_compressed) + " [Duplicated data found (Saved Space): " + humanbytes(undeduped_uncompressed -deduped_compressed) + " ]")
-    # print("Compression Rate : " + str(1 - compression_rate) + "% Saved Space: " + humanbytes(undeduped_uncompressed - undeduped_compressed))
-    # print("Total Savings: " + humanbytes((undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)))
+    stat_msg_queue.put({'STAT:TOTAL_SIZE':partition_size_gb})
+    stat_msg_queue.put({'STAT:Undeduped (No Compression) Space Used':undeduped_uncompressed})        
+    stat_msg_queue.put({'STAT:Free Space': (max(0,(partition_size_gb - (deduped_compressed))))})
+    stat_msg_queue.put({'STAT:Undeduped (Compression) Space Used':undeduped_compressed})
+    stat_msg_queue.put({'STAT:Deduped (Compression) Space Used':deduped_compressed})
+    stat_msg_queue.put({'STAT:Compression Rate':1 - compression_rate})
+    stat_msg_queue.put({'STAT:Total Savings':(undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)})
+    stat_msg_queue.put({'STAT:Fragmentation':max(0, fragmentation['free_size'])})
+    stat_msg_queue.put({'STAT:Fragmented Blocks':fragmentation['free_count']})
 
     gc.collect()
 
@@ -664,18 +622,11 @@ def garbage_collector(stat_msg_queue):
     global hash_table
     global key_index
     global fragmentation
-
-    if performance_measure_bars:
-        # GC_bar.reset()
-        GC_bar.total = GC_bar.total + (len(GC.add_uses) + len(GC.remove_uses))
-        GC_bar.refresh()
     
     try:        
         while len(GC.add_uses) > 0:
             add = GC.add_uses.popleft()
-            hash_table[add].uses = hash_table[add].uses + 1 
-            if performance_measure_bars:
-                GC_bar.update(1)
+            hash_table[add].uses = hash_table[add].uses + 1             
     except IndexError:
         pass
 
@@ -696,9 +647,7 @@ def garbage_collector(stat_msg_queue):
                         free_blocks[hash_table[remove].chunk].insert(hash_table[remove].size, [hash_table[remove].offset])
                     finally:
                         fragmentation['free_size'] = fragmentation['free_size'] + hash_table[remove].size
-                        fragmentation['free_count'] = fragmentation['free_count'] + 1
-            if performance_measure_bars:
-                GC_bar.update(1)
+                        fragmentation['free_count'] = fragmentation['free_count'] + 1            
             else:
                 if random.randrange(1,q_random) == 1:
                     stat_msg_queue.put({'INFO:GCProgress' : str((len(GC.add_uses) + len(GC.remove_uses)))})
@@ -782,12 +731,6 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
 
     
     while writing:
-        
-        if performance_measure_bars and write_bar.n > write_bar.total:
-            write_bar.reset()
-            write_bar.total = write_bar.total + wq.qsize() + swq.qsize()
-            write_bar.refresh()
-
         try:            
             q = write_buffer.popleft()
             if not q.result and q.hash not in hash_table:
@@ -848,36 +791,26 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
                     if len(q.compressed_data) <= small_block_limit:
                         small_block_read_cache[q.hash] = q.data
 
-                    registers_processed = registers_processed + 1
-                    if q.compressed:
-                        bytes_processed = bytes_processed + len(q.compressed_data)
-                    else:
-                        bytes_processed = bytes_processed + len(q.data)
-                    
-                    if performance_measure_bars:
-                        write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
-                        write_bar.update(1)                            
-                        # write_bar.refresh()
                     try:
                         del write_read_cache[q.hash]
                     except KeyError:
                         continue
-                        # print('Read cache Key error, the following key is nor present at the write read cache:' + str(q.hash))
+
+                    registers_processed = registers_processed + 1
+                    if q.compressed:
+                        bytes_processed = bytes_processed + len(q.compressed_data)
+                    else:
+                        bytes_processed = bytes_processed + len(q.data)                    
                     continue                    
 
                 except Exception:
                     print(traceback.format_exc()) 
-            else:
-                # Count the register as done and update counters and bars if needed
+            else:                
                 registers_processed = registers_processed + 1                
                 if q.compressed:
                     bytes_processed = bytes_processed + len(q.compressed_data)
                 else:
-                    bytes_processed = bytes_processed + len(q.data)
-                
-                if performance_measure_bars:
-                    write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
-                    write_bar.update(1)
+                    bytes_processed = bytes_processed + len(q.data)                
             del q
 
         except IndexError:
@@ -887,8 +820,7 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
     write_buffer_lock = False
     
     if registers_processed > 0:
-        if performance_measure_bars:
-            write_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
+        pass
         # else:
         #     if random.randrange(1,q_random) == 1:
         # stat_msg_queue.put({'INFO:WriteSpeed' : bytes_processed/(time.time()-start_time)})
@@ -912,47 +844,46 @@ def dedup(data, stat_msg_queue):
 
     start_time = time.time()
     bytes_processed = 0
-    if type(data) == bytearray or type(data) == bytes:
-        if type(data) == bytes:
+
+    if type(data) == bytearray or type(data) == bytes or type(data) == memoryview:
+        if type(data) != memoryview:
             data = bytearray(data)
         
-        ch = variable_chunks(data)
-        if performance_measure_bars:
-            dedup_bar.total = len(ch) + dedup_bar.total
-            dedup_bar.refresh()
-        for c in ch:            
+        if len(data) <= min_blk_size:
+            _hashed_data = hash_data(data)
             blk_list.append(0)
+            if _hashed_data in hash_table:
+                blk_list[len(blk_list)-1] = FileBlock(_hashed_data, len(data))
+                update_index(_hashed_data)
+            else:                
+                q = QueuedWrite(len(blk_list)-1, _hashed_data, bytearray(data))
+                blk_list[q.idx] = FileBlock(_hashed_data, len(data))
+                write_read_cache[_hashed_data] = data
+                write_buffer.append(q)
+                bytes_processed = bytes_processed + len(data)
+        else:
+            ch = variable_chunks(data)
+            for c in ch:
+                blk_list.append(0)
 
-            if c.hash in hash_table:
-                blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
-                update_index(c.hash)
-            else:
-                done = False
-                
-                if not done:
-                    q = QueuedWrite(len(blk_list)-1, c.hash, c.data)
-                    blk_list[q.idx] = FileBlock(q.hash, len(c.data))
+                if c.hash in hash_table:
+                    blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
+                    update_index(c.hash)
+                else:                
+                    q = QueuedWrite(len(blk_list)-1, c.hash, bytearray(c.data))
+                    blk_list[q.idx] = FileBlock(c.hash, len(c.data))
                     write_read_cache[c.hash] = c.data
-                    write_buffer.append(q)            
-            bytes_processed = bytes_processed + len(c.data)
+                    write_buffer.append(q)
 
-            if performance_measure_bars:
-                dedup_bar.update(1)                
-        del ch
+                bytes_processed = bytes_processed + len(c.data)
+
     else:
         print("Value Error when preparing writes")
         print(traceback.format_exc())
         raise ValueError
     
-    if performance_measure_bars:
-        dedup_bar.set_postfix(S=humanbytes(bytes_processed/(time.time()-start_time))+" /s")
-    else:
-        if random.randrange(1,q_random) == 1:
-            stat_msg_queue.put({'INFO:DedupSpeed' : bytes_processed/ (time.time()- start_time)})
-        
-    del queued_writes
-    del start_time
-    del bytes_processed
+    if random.randrange(1,q_random) == 1:
+        stat_msg_queue.put({'INFO:DedupSpeed' : bytes_processed/ (time.time()- start_time)})
     
     return blk_list
 
@@ -966,7 +897,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
     data = bytearray()
 
     cached = False    
-    r = bytearray()   
+    r = bytearray()
     
     start_time = time.time()
     bytes_processed = 0
@@ -977,7 +908,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
         elif idx > end_block:
             return data
 
-        if idx >= start_block:
+        if idx >= start_block:            
             d = seek_in_cache(b.hash)
             if d is not None:
                 if len(d) != b.size:
@@ -990,7 +921,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                     r = r[b.size:]
                     read_cache[b.hash] = d
             
-            if hash_table[b.hash].chunk == -1:
+            if d is None and hash_table[b.hash].chunk == -1:
                 try:
                     d = read_small_block(b.hash, stat_msg_queue)
                     if hash_table[b.hash].compressed:
@@ -1007,7 +938,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                     _hash = hash_table[b.hash].hash
                     read_size = hash_table[b.hash].size
                 except KeyError:
-                    time.sleep(0.01)
+                    time.sleep(0.002)
                     d = seek_in_cache(b.hash)
                     if d is not None:
                         break
@@ -1022,18 +953,19 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                         mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
                         mm.seek(_block)
                         r = mm.read(read_size + over_read_limit)
-                        d = r[:read_size]
-                        r = r[read_size:]
-
-                        if hash_table[b.hash].compressed:
-                            decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
-                        else:
-                            decompresed_data = d
-
-                        read_cache[_hash] = decompresed_data                                                
-                        mm.madvise(mmap.MADV_DONTNEED)
+                        # mm.madvise(mmap.MADV_DONTNEED)
                         mm.close()
-                        del mm
+                        # del mm
+                                        
+                    d = r[:read_size]
+                    r = r[read_size:]
+                    
+                    if hash_table[b.hash].compressed:
+                            decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
+                    else:
+                        decompresed_data = d
+
+                        read_cache[_hash] = decompresed_data
                     
                     d = decompresed_data
 
@@ -1043,14 +975,13 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                     raise IOError
 
             if b.hash != hash_data(d):
-                print('Critical data failure')
+                print('Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash')
             if d is not None:                
                 data += d
-                bytes_processed = bytes_processed + len(d)
-    if random.randrange(1,q_random) == 1:
-        stat_msg_queue.put({'INFO:ReadSpeed' : str(bytes_processed/ (time.time()- start_time))})
-    try:
-        del data
+                bytes_processed = bytes_processed + len(d)    
+    stat_msg_queue.put({'INFO:ReadSpeed' : str(bytes_processed/ (time.time()- start_time))})
+    
+    try:        
         del cached
         del r    
         del start_time
@@ -1143,10 +1074,12 @@ def write_small_block_to_disk(swq, stat_msg_queue):
     while True:
         try:
             if not swq.empty():
-                d_hash, d_data = swq.get(False)
-                write_small_block(d_hash, d_data, stat_msg_queue)
+                start = time.time()
+                d_hash, d_data = swq.get(False)                
+                written = write_small_block(d_hash, bytearray(d_data), stat_msg_queue)                
                 del d_data
                 del d_hash
+                stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start)})                
         except:
             continue
 
@@ -1158,36 +1091,49 @@ def write_to_disk(wq, resq, stat_msg_queue):
         bytes_written = 0
         start = time.time()        
         if not wq.empty():
-            try:                
-                q, datastore = wq.get(False)
+            try:
+                next_q = None
+                next_datastore = None
                 
-                with open(datastore[q.chunk].path, "r+b") as f:
-                    mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
-                    mm.seek(q.block)
-                    if q.compressed:                            
-                        written = mm.write(q.compressed_data)
-                        # written_hash = hash_data(q.compressed_data)
-                    else:                            
-                        written = mm.write(q.data)
-                        # written_hash = hash_data(q.data)
+                work = []
 
-                    # if not q.compressed and written_hash != q.hash:
-                    #     print("Data corruption - Hash inconsistance")
+                this_q, this_datastore = wq.get(False)                
+                work.append((this_q, this_datastore))
 
-                    # elif q.compressed and written_hash != hash_data(q.compressed_data):
-                    #     print("Data corruption - Hash inconsistance")
+                for i in range(0, 200):
+                    if wq.qsize() > 1:
+                        next_q, next_datastore = wq.get(False)
+                        if next_q.chunk == this_q.chunk:
+                            work.append((next_q, next_datastore))
+                            this_q = next_q
+                            this_datastore = next_datastore
+                        else:
+                            wq.put_nowait((next_q, next_datastore))
+                            break
+                
+                with open(this_datastore[this_q.chunk].path, "r+b") as f:
+                    mm = mmap.mmap(f.fileno(), length=this_datastore[this_q.chunk].size, access=mmap.ACCESS_WRITE)
+                    for q, datastore in work:                    
+                        mm.seek(q.block)
+                        if q.compressed:                            
+                            written = written + mm.write(q.compressed_data)                        
+                        else:                            
+                            written = written + mm.write(q.data)                        
                     mm.madvise(mmap.MADV_DONTNEED)
                     mm.close()
                     del mm
-                del q
-                del datastore
+                    del q
+                    del datastore
+                    del this_q
+                    del this_datastore
+                
             except ValueError:
                 print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
                 print(traceback.format_exc())
             except queue.Empty:
                 continue
-            if random.randrange(0,3) == 0:
-                stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start)})
+            # if random.randrange(0,3) == 0:
+            stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start)})
         else:
             del written
             del bytes_written
@@ -1202,9 +1148,20 @@ async def persist(stat_msg_queue):
     resq = mp.Queue() # Fila com as respostas das mensagens escritas
     swq = mp.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno
     wbp = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
+    # wbp2 = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
+    # wbp3 = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
+
     wsmbp = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
+    # wsmbp2 = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
+    # wsmbp3 = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
+
     wbp.start()
+    # wbp2.start()
+    # wbp3.start()
+    
     wsmbp.start()
+    # wsmbp2.start()
+    # wsmbp3.start()
     
     time.sleep(5)
     last_time = time.time()    
@@ -1238,18 +1195,6 @@ async def usage(stat_msg_queue):
             stat_msg_queue.put({'INFO:Memory (active in use)': unix_memory()})
             stat_msg_queue.put({'INFO:Memory (resident)': resident()})
             stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
-
-            if performance_measure_bars:
-                memory_bar_active.reset()
-                memory_bar_active.n = unix_memory() //1024//1024
-                memory_bar_active.refresh()                
-                memory_bar_inactive.reset()
-                memory_bar_inactive.n = resident() //1024//1024
-                memory_bar_inactive.refresh()                
-                memory_bar_statck.reset()
-                memory_bar_statck.n = stacksize() //1024//1024
-                memory_bar_statck.refresh()
-            
             last_time = time.time()
         await trio.sleep(30)
 

@@ -119,8 +119,8 @@ def write_small_block(_hash, data, stat_msg_queue):
     #         pass    
     
     with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
-        smbs[_hash] = data        
-        smbs.commit()
+        smbs[_hash] = data
+        smbs.commit()        
     
     return len(data)
     

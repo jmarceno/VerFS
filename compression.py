@@ -70,7 +70,6 @@ def compressed_pickle(path, data, format=4, stat_msg_queue=None):
             return False
 
 
-
 # Load any compressed pickle file
 def decompress_pickle(_file, format=4, stat_msg_queue=None):
     """
@@ -88,9 +87,12 @@ def decompress_pickle(_file, format=4, stat_msg_queue=None):
     elif format == 3:
         raise NotImplementedError
     elif format == 4:
-        with open(_file, mode='r') as f:
-            data = f.read()
-            return pickle.load(data)
+        with open(_file, 'rb') as pickle_file:
+            content = pickle.load(pickle_file)
+            return content
+        # with open(_file, mode='rb') as f:
+        #     data = f.read()
+        #     return pickle.load(data)
 
 
 def compress_data(data, _format=1, stat_msg_queue=None):
