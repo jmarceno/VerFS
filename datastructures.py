@@ -87,7 +87,7 @@ class Block:
         self.uses = 1
         self.compressed = False
         self.DELETED = False
-        self.DELETION_TIME = time.time()
+        self.DELETION_TIME = str(time.time())
 
 
 class FileBlock:
@@ -104,8 +104,7 @@ class SmallBlock:
         self.uses = 1
         self.compressed = False
         self.DELETED = False
-        self.DELETION_TIME = time.time()
-
+        self.DELETION_TIME = str(time.time())
     
         if _size == _deflated_size:
             self.compressed = True

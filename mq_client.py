@@ -25,7 +25,11 @@ def send_message(stat_msg_queue):
         try:
             socket.connect(server)
             socket.send_json(msg)
-            resp = socket.recv_json()            
+            resp = socket.recv_json()
+            if stat_msg_queue.qsize() > 500:               
+                for i in range(0, 500):
+                    stat_msg_queue.get(False)
+                
         except:
             print(traceback.format_exc())
             continue

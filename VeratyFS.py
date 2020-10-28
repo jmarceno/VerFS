@@ -209,7 +209,7 @@ class Operations(pyfuse3.Operations):
 
     async def readdir(self, inode, off, token):
         dir_entries = []
-        [dir_entries.append(self.contents[x]) for x in self.contents if self.contents[x].parent_inode == inode]
+        [dir_entries.append(self.contents[x]) for y, x in enumerate(self.contents,off) if self.contents[x].parent_inode == inode]
         # for d in self.contents:
         #     if self.contents[d].parent_inode == inode:
         #         dir_entries.append(self.contents[d])
@@ -374,7 +374,7 @@ class Operations(pyfuse3.Operations):
         size = 0
         for k in list(self.inodes.keys()):
             size = size + self.inodes[k].size
-        stat_.f_blocks = max(0, (partition_size_gb // stat_.f_frsize))
+        stat_.f_blocks = max(0, (partition_size_gb // (stat_.f_frsize//dummy_mult)))
         # stat_.f_blocks = size // stat_.f_frsize
         stat_.f_bfree = max(0, (partition_size_gb - get_usage(self.stat_msg_queue)[2]) // allocation_unit )#stat_.f_blocks - (size // allocation_unit)
         # stat_.f_bfree = max(size // stat_.f_frsize, 1024) #TODO: WHAT IS THIS SHIT?
@@ -433,14 +433,15 @@ class Operations(pyfuse3.Operations):
         return await self.getattr(inode)
 
     
-    async def read(self, fh, offset, length):
-        # debugpy.debug_this_thread()
-        f = None
+    async def read(self, fh, offset, length):        
+        # f = None
 
-        for i in list(self.inodes.keys()):
-            if self.inodes[i].id == fh:
-                f = self.inodes[i]
-                break
+        # f = [x for x in self.inodes.values()  if x.id == fh]
+
+        # for i in list(self.inodes.keys()):
+        #     if self.inodes[i].id == fh:
+        #         f = self.inodes[i]
+        #         break
 
         if len(self.inodes[fh].data) == 0:
             data = b''
@@ -512,8 +513,7 @@ class Operations(pyfuse3.Operations):
 
         return data
     
-    async def write(self, fh, offset, buf):
-        # debugpy.debug_this_thread()
+    async def write(self, fh, offset, buf):        
         buf = memoryview(buf)
         f = None
         for i in list(self.inodes.keys()):
@@ -882,7 +882,7 @@ def dedup(data, stat_msg_queue):
         print(traceback.format_exc())
         raise ValueError
     
-    if random.randrange(1,q_random) == 1:
+    if random.randrange(0,10) == 1:
         stat_msg_queue.put({'INFO:DedupSpeed' : bytes_processed/ (time.time()- start_time)})
     
     return blk_list
@@ -920,59 +920,59 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                     d = r[:b.size]
                     r = r[b.size:]
                     read_cache[b.hash] = d
-            
-            if d is None and hash_table[b.hash].chunk == -1:
-                try:
-                    d = read_small_block(b.hash, stat_msg_queue)
-                    if hash_table[b.hash].compressed:
-                            d = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read                    
-                    small_block_read_cache[b.hash] = d
-                except Exception:
-                    print(traceback.format_exc())
-                    pass
-
-            if d is None:
-                try:
-                    _chunk = hash_table[b.hash].chunk
-                    _block = hash_table[b.hash].offset
-                    _hash = hash_table[b.hash].hash
-                    read_size = hash_table[b.hash].size
-                except KeyError:
-                    time.sleep(0.002)
-                    d = seek_in_cache(b.hash)
-                    if d is not None:
-                        break
-
-                    _chunk = hash_table[b.hash].chunk
-                    _block = hash_table[b.hash].offset
-                    _hash = hash_table[b.hash].hash
-                    read_size = hash_table[b.hash].size
-
-                if os.path.isfile(datastore[_chunk].path):
-                    with open(datastore[_chunk].path, "r+b", buffering=over_read_limit) as f:
-                        mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
-                        mm.seek(_block)
-                        r = mm.read(read_size + over_read_limit)
-                        # mm.madvise(mmap.MADV_DONTNEED)
-                        mm.close()
-                        # del mm
-                                        
-                    d = r[:read_size]
-                    r = r[read_size:]
-                    
-                    if hash_table[b.hash].compressed:
-                            decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
-                    else:
-                        decompresed_data = d
-
-                        read_cache[_hash] = decompresed_data
-                    
-                    d = decompresed_data
-
+            else:            
+                if d is None and hash_table[b.hash].chunk == -1:
+                    try:
+                        d = read_small_block(b.hash, stat_msg_queue)
+                        if hash_table[b.hash].compressed:
+                                d = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read                    
+                        small_block_read_cache[b.hash] = d
+                    except Exception:
+                        print(traceback.format_exc())
+                        pass
                 else:
-                    print("IOError when trying to read physical media")
-                    print(traceback.format_exc())
-                    raise IOError
+                    if d is None:
+                        try:
+                            _chunk = hash_table[b.hash].chunk
+                            _block = hash_table[b.hash].offset
+                            _hash = hash_table[b.hash].hash
+                            read_size = hash_table[b.hash].size
+                        except KeyError:
+                            time.sleep(0.001)
+                            d = seek_in_cache(b.hash)
+                            if d is not None:
+                                break
+
+                            _chunk = hash_table[b.hash].chunk
+                            _block = hash_table[b.hash].offset
+                            _hash = hash_table[b.hash].hash
+                            read_size = hash_table[b.hash].size
+
+                        if os.path.isfile(datastore[_chunk].path):
+                            with open(datastore[_chunk].path, "r+b", buffering=over_read_limit) as f:
+                                mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
+                                mm.seek(_block)
+                                r = mm.read(read_size + over_read_limit)
+                                # mm.madvise(mmap.MADV_DONTNEED)
+                                mm.close()
+                                # del mm
+                                                
+                            d = r[:read_size]
+                            r = r[read_size:]
+                            
+                            if hash_table[b.hash].compressed:
+                                    decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
+                            else:
+                                decompresed_data = d
+
+                                read_cache[_hash] = decompresed_data
+                            
+                            d = decompresed_data
+
+                        else:
+                            print("IOError when trying to read physical media")
+                            print(traceback.format_exc())
+                            raise IOError
 
             if b.hash != hash_data(d):
                 print('Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash')
@@ -1079,7 +1079,8 @@ def write_small_block_to_disk(swq, stat_msg_queue):
                 written = write_small_block(d_hash, bytearray(d_data), stat_msg_queue)                
                 del d_data
                 del d_hash
-                stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start)})                
+                if random.randrange(0,10) == 0:
+                    stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start)})                
         except:
             continue
 
@@ -1092,61 +1093,33 @@ def write_to_disk(wq, resq, stat_msg_queue):
         start = time.time()        
         if not wq.empty():
             try:
-                # next_q = None
-                # next_datastore = None
-                
-                # work = []
-
                 q, datastore = wq.get(False)                
-                # work.append((this_q, this_datastore))
-
-                # for i in range(0, 200):
-                #     if wq.qsize() > 1:
-                #         next_q, next_datastore = wq.get(False)
-                #         if next_q.chunk == this_q.chunk:
-                #             work.append((next_q, next_datastore))
-                #             this_q = next_q
-                #             this_datastore = next_datastore
-                #         else:
-                #             # wq.put_nowait((next_q, next_datastore))
-                #             break
                 
                 with open(datastore[q.chunk].path, "r+b") as f:
                     mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
                     # for q, datastore in work:                    
                     mm.seek(q.block)
                     if q.compressed:                            
-                        written = written + mm.write(q.compressed_data)                        
+                        written = mm.write(q.compressed_data)                        
                     else:                            
-                        written = written + mm.write(q.data)                        
-                    mm.madvise(mmap.MADV_DONTNEED)                    
+                        written = mm.write(q.data)                        
+                    # mm.madvise(mmap.MADV_DONTNEED)                    
                     mm.close()
-                    # del mm
+                    del mm
+                    # gc.collect()
                     # del q
-                    # del datastore
-                    del q
-                    del datastore
-
-                    # if next_q is not None:
-                # with open(next_datastore[next_q.chunk].path, "r+b") as f:
-                #     mm = mmap.mmap(f.fileno(), length=next_datastore[next_q.chunk].size, access=mmap.ACCESS_WRITE)                    
-                #     mm.seek(next_q.block)
-                #     if next_q.compressed:                            
-                #         written = written + mm.write(next_q.compressed_data)                        
-                #     else:                            
-                #         written = written + mm.write(next_q.data)                        
-                #     mm.madvise(mmap.MADV_DONTNEED)                    
-                #     mm.close()
-
-                #     del mm
-                
+                    # del datastore                    
+                                    
             except ValueError:
                 print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
                 print(traceback.format_exc())
             except queue.Empty:
                 continue
-            # if random.randrange(0,3) == 0:
-            stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start)})
+            if random.randrange(0,10) == 0:
+                stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start)})
+            
+            # if unix_memory() > writer_thread_mem_limit:
+            #     break
         else:
             del written
             del bytes_written
@@ -1160,22 +1133,20 @@ async def persist(stat_msg_queue):
     wq = mp.Queue() # Fila de mensagens a serem escritas no disco
     resq = mp.Queue() # Fila com as respostas das mensagens escritas
     swq = mp.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno
-    wbp = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
-    # wbp2 = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
-    # wbp3 = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
-
-    wsmbp = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
-    # wsmbp2 = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
-    # wsmbp3 = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
-
-    wbp.start()
-    # wbp2.start()
-    # wbp3.start()
     
-    wsmbp.start()
-    # wsmbp2.start()
-    # wsmbp3.start()
-    
+    smbw_threads = []
+    bbw_threads = []
+
+    for i in range(0, smb_write_threads):
+        p = mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue ))
+        p.start()
+        smbw_threads.append(p)
+
+    for i in range(0, bb_write_threads):
+        p = mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, ))
+        p.start()
+        bbw_threads.append(p)
+   
     time.sleep(5)
     last_time = time.time()    
     while True:
@@ -1184,22 +1155,60 @@ async def persist(stat_msg_queue):
                 await trio.to_thread.run_sync(write_new_blocks, write_buffer, wq, resq, swq, stat_msg_queue)
             await trio.to_thread.run_sync(garbage_collector, stat_msg_queue)
             await trio.to_thread.run_sync(persist_data, [inodes, contents], stat_msg_queue)
-            last_time = time.time()
-            gc.collect()
-        await trio.sleep(0.05)
+            last_time = time.time()            
 
-    wsmbp.join(timeout=5)    
-    wbp.join(timeout=5)
-    wsmbp.close()
-    wbp.close()
-    wsmbp.kill()
-    wbp.kill()
+            for i, t in enumerate(smbw_threads):
+                try:
+                    if not t.is_alive():
+                        try:
+                            th = smbw_threads.pop(i)
+                            th.terminate()
+                            smbw_threads.append(mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue )).start())
+                        except:
+                            smbw_threads.append(mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue )).start())
+                    
+                except AttributeError:
+                    th = smbw_threads.pop(i)
+                    smbw_threads.append(mp.Process(target=write_small_block_to_disk, args=(swq,stat_msg_queue )).start())
+
+            for i, t in enumerate(bbw_threads):
+                try:
+                    if not t.is_alive():
+                        try:
+                            th = bbw_threads.pop(i)
+                            th.terminate()
+                            bbw_threads.append(mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, )).start())
+                        except:
+                            bbw_threads.append(mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, )).start())                            
+                    
+                except AttributeError:
+                    th = bbw_threads.pop(i)
+                    bbw_threads.append(mp.Process(target=write_to_disk, args=(wq,resq,stat_msg_queue, )).start())
 
 
+        gc.collect()
+        await trio.sleep(0.1)
+
+
+    for t in smbw_threads:
+        try:
+            t.join(timeout=5)
+            t.kiil()
+        except:
+            continue
+
+    for t in bbw_threads:
+        try:
+            t.join(timeout=5)
+            t.kiil()
+        except:
+            continue    
+
+    
 async def usage(stat_msg_queue):
     mem = virtual_memory()
 
-    time.sleep(1)
+    time.sleep(30)
     last_time = time.time()    
     while True:        
         if (time.time() - last_time > usage_interval):  
