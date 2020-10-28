@@ -915,70 +915,71 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                     print("DEBUG: Invalid data on cache entry")
                     d = None
                     del read_cache[b.hash]
-            if d is None and len(r) > b.size:
-                if hash_data(r[:hash_table[b.hash].size]) == b.hash:
-                    d = r[:b.size]
-                    r = r[b.size:]
-                    read_cache[b.hash] = d
-            else:            
-                if d is None and hash_table[b.hash].chunk == -1:
-                    try:
-                        d = read_small_block(b.hash, stat_msg_queue)
-                        if hash_table[b.hash].compressed:
-                                d = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read                    
-                        small_block_read_cache[b.hash] = d
-                    except Exception:
-                        print(traceback.format_exc())
-                        pass
+        if d is None and len(r) > b.size:
+            if hash_data(r[:hash_table[b.hash].size]) == b.hash:
+                d = r[:b.size]
+                r = r[b.size:]
+                read_cache[b.hash] = d        
+        
+        if d is None and hash_table[b.hash].chunk == -1:
+            try:
+                d = read_small_block(b.hash, stat_msg_queue)
+                if hash_table[b.hash].compressed:
+                        d = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read                    
+                small_block_read_cache[b.hash] = d
+            except Exception:
+                print(traceback.format_exc())
+                pass
+    
+        if d is None:
+            try:
+                _chunk = hash_table[b.hash].chunk
+                _block = hash_table[b.hash].offset
+                _hash = hash_table[b.hash].hash
+                read_size = hash_table[b.hash].size
+            except KeyError:
+                time.sleep(0.001)
+                d = seek_in_cache(b.hash)
+                if d is not None:
+                    break
+
+                _chunk = hash_table[b.hash].chunk
+                _block = hash_table[b.hash].offset
+                _hash = hash_table[b.hash].hash
+                read_size = hash_table[b.hash].size
+
+            if os.path.isfile(datastore[_chunk].path):
+                with open(datastore[_chunk].path, "r+b", buffering=over_read_limit) as f:
+                    mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
+                    mm.seek(_block)
+                    r = mm.read(read_size + over_read_limit)
+                    # mm.madvise(mmap.MADV_DONTNEED)
+                    mm.close()
+                    # del mm
+                                    
+                d = r[:read_size]
+                r = r[read_size:]
+                
+                if hash_table[b.hash].compressed:
+                        decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
                 else:
-                    if d is None:
-                        try:
-                            _chunk = hash_table[b.hash].chunk
-                            _block = hash_table[b.hash].offset
-                            _hash = hash_table[b.hash].hash
-                            read_size = hash_table[b.hash].size
-                        except KeyError:
-                            time.sleep(0.001)
-                            d = seek_in_cache(b.hash)
-                            if d is not None:
-                                break
+                    decompresed_data = d
 
-                            _chunk = hash_table[b.hash].chunk
-                            _block = hash_table[b.hash].offset
-                            _hash = hash_table[b.hash].hash
-                            read_size = hash_table[b.hash].size
+                    read_cache[_hash] = decompresed_data
+                
+                d = decompresed_data
 
-                        if os.path.isfile(datastore[_chunk].path):
-                            with open(datastore[_chunk].path, "r+b", buffering=over_read_limit) as f:
-                                mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
-                                mm.seek(_block)
-                                r = mm.read(read_size + over_read_limit)
-                                # mm.madvise(mmap.MADV_DONTNEED)
-                                mm.close()
-                                # del mm
-                                                
-                            d = r[:read_size]
-                            r = r[read_size:]
-                            
-                            if hash_table[b.hash].compressed:
-                                    decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
-                            else:
-                                decompresed_data = d
+            else:
+                print("IOError when trying to read physical media")
+                print(traceback.format_exc())
+                raise IOError
 
-                                read_cache[_hash] = decompresed_data
-                            
-                            d = decompresed_data
-
-                        else:
-                            print("IOError when trying to read physical media")
-                            print(traceback.format_exc())
-                            raise IOError
-
-            if b.hash != hash_data(d):
-                print('Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash')
-            if d is not None:                
-                data += d
-                bytes_processed = bytes_processed + len(d)    
+        if b.hash != hash_data(d):
+            print('Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash')
+        if d is not None:                
+            data += d
+            bytes_processed = bytes_processed + len(d)
+            
     stat_msg_queue.put({'INFO:ReadSpeed' : str(bytes_processed/ (time.time()- start_time))})
     
     try:        

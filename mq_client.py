@@ -7,6 +7,7 @@
 import zmq
 import json
 import traceback
+import queue
 
 def send_message(stat_msg_queue):
 
@@ -26,9 +27,12 @@ def send_message(stat_msg_queue):
             socket.connect(server)
             socket.send_json(msg)
             resp = socket.recv_json()
-            if stat_msg_queue.qsize() > 500:               
+            if stat_msg_queue.qsize() > 499:               
                 for i in range(0, 500):
-                    stat_msg_queue.get(False)
+                    try:
+                        stat_msg_queue.get(False)
+                    except queue.Empty:
+                        break
                 
         except:
             print(traceback.format_exc())
