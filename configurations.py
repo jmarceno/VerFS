@@ -46,7 +46,7 @@ read_cache = LRU(maxlen=cache_size)
 small_block_cache_size = 300000
 small_block_read_cache =LRU(maxlen=small_block_cache_size)
 
-dummy_mult = 128
+dummy_mult = 1024
 dummy_allocation_unit = 1024*dummy_mult
 allocation_unit = 1024
 min_blk_size = allocation_unit*32

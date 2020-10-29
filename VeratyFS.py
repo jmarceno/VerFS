@@ -433,7 +433,8 @@ class Operations(pyfuse3.Operations):
         return await self.getattr(inode)
 
     
-    async def read(self, fh, offset, length):        
+    async def read(self, fh, offset, length): 
+        start = time.time()       
         # f = None
 
         # f = [x for x in self.inodes.values()  if x.id == fh]
@@ -484,8 +485,10 @@ class Operations(pyfuse3.Operations):
 
                     break
 
-            if start_blk == 0 and end_blk == 0:        
-                return get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
+            if start_blk == 0 and end_blk == 0: 
+                data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
+                print("Time taken -> " + str(time.time()-start) + " Data Length:" + str(len(data)))                       
+                return data
             else:
                 data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
 
@@ -501,15 +504,17 @@ class Operations(pyfuse3.Operations):
                     if end_diff > 0 and len(data) > (end_offset-offset):
                         data = data[:-end_diff]
 
-            if data == b'':
-                print("Returning Empty data @ [async def read]. Is this intended?")
+            # if data == b'':
+            #     print("Returning Empty data @ [async def read]. Is this intended?")
 
             if len(data) != (end_offset - offset):
                 print("Returning wrong length data @ [async def read]. Is this intended?")
-            return data
+                return data
 
         if data is None:
             data = b''
+
+        print("Time taken -> " + str(time.time()-start) + " Data Length:" + str(len(data)))
 
         return data
     
