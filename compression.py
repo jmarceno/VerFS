@@ -8,6 +8,8 @@ from _bz2 import BZ2Decompressor
 import struct
 import traceback
 from copy import deepcopy
+import os
+from shutil import copyfile
 
 lzma_filters = [
     {"id": lzma.FILTER_DELTA, "dist": 5},
@@ -16,27 +18,34 @@ lzma_filters = [
 
 zlib_compression_level = 6
 bz2_compression_level = 1
-lz4_compression_level = frame.COMPRESSIONLEVEL_MINHC
+lz4_compression_level = 1 # frame.COMPRESSIONLEVEL_MINHC
 
-compression_trigger = 0.9  # How much the data has to be compressed for it to be worth. Rates below that will cause the data to not be compressed
+compression_trigger = 0.8  # How much the data has to be compressed for it to be worth. Rates below that will cause the data to not be compressed
 
 
 # Pickle a file and then compress it into a file with extension
-def compressed_pickle(path, data, format=1):
+def compressed_pickle(path, data, format=4, stat_msg_queue=None):
     """
 
     :param path:
     :param data:
-    :param format: 1: Bzip2, 2:Zip, 3:Lzma
+    :param format: 1: Bzip2, 2:Zip, 3:Lzma, 4:No-Compression
     """
+
+    if os.path.isfile(path):       
+        try: 
+            copyfile(path, path+'.bak')
+        except:
+            print("Impossible to backup "+ str(path) + " before update. Defering copy. Please check permissions at the metadata directory.")
+            return False
+
+
     format = int(format)
-    if format == 1:
-        
+    if format == 1:        
         if type(data) == dict:
             n_data = { k : v for k,v in data.items() if v}
         else:
             n_data = data
-
         try:
             with bz2.BZ2File(path, 'w') as f:
                 cPickle.dump(n_data, f)
@@ -49,33 +58,44 @@ def compressed_pickle(path, data, format=1):
     elif format == 3:
         raise NotImplementedError
     elif format == 4:
-        with frame.open(path, mode='wb') as f:
-            cPickle.dump(data, f)
+        if type(data) == dict:
+            n_data = { k : v for k,v in data.items() if v}
+        else:
+            n_data = data        
+        try:
+            with open(path, 'wb') as f:
+                pickle.dump(n_data, f)
+                return True
+        except RuntimeError:
+            return False
 
 
 # Load any compressed pickle file
-def decompress_pickle(file, format=1):
+def decompress_pickle(_file, format=4, stat_msg_queue=None):
     """
 
     :param file:
     :param format:
-    :return: 1: Bzip2, 2:Zip, 3:Lzma, 4: lz4
+    :return: 1: Bzip2, 2:Zip, 3:Lzma, 4: No-Compression
     """
     format = int(format)
     if format == 1:
-        data = bz2.BZ2File(file, 'rb')
+        data = bz2.BZ2File(_file, 'rb')
         return cPickle.load(data)
     elif format == 2:
         raise NotImplementedError
     elif format == 3:
         raise NotImplementedError
     elif format == 4:
-        with frame.open(file, mode='r') as fp:
-            data = fp.read()
-            return cPickle.load(data)
+        with open(_file, 'rb') as pickle_file:
+            content = pickle.load(pickle_file)
+            return content
+        # with open(_file, mode='rb') as f:
+        #     data = f.read()
+        #     return pickle.load(data)
 
 
-def compress_data(data, _format=1):
+def compress_data(data, _format=1, stat_msg_queue=None):
     """
 
     :param data:
@@ -86,8 +106,7 @@ def compress_data(data, _format=1):
     if _format == 1:
         cp_data = frame.compress(data, compression_level=lz4_compression_level)
         if len(cp_data) < len(data):
-            if len(cp_data) / len(data) < compression_trigger:
-                # print(str(len(cp_data) / len(data)))
+            if len(cp_data) / len(data) < compression_trigger:                
                 return True, cp_data
             else:
                 return False, data
@@ -101,7 +120,7 @@ def compress_data(data, _format=1):
         return bz2.compress(data, bz2_compression_level)
 
 
-def decompress_data(data, _format=1):
+def decompress_data(data, _format=1, stat_msg_queue=None):
     """
 
     :param data:
@@ -114,19 +133,16 @@ def decompress_data(data, _format=1):
             d_context = frame.create_decompression_context()
             d1, b, e = frame.decompress_chunk(d_context, data)
             return d1
-        except ValueError:
-            # print("Compression Fallback")
+        except ValueError:            
             return data
-        except RuntimeError:
-            # print("Unknow compression error")
-            # print(traceback.format_exc())
+        except RuntimeError:            
             return data
     elif _format == 2:
         raise zlib.decompress(data)
     elif _format == 3:
         return lzma_decompress(data)
     elif _format == 4:
-        return bz2_decompress(data)
+        return bz2_decompress(data, stat_msg_queue)
 
 """"
 LZ4 NOTE 
@@ -143,7 +159,7 @@ Data Compressors
 """
 
 
-def lzma_decompress(data):
+def lzma_decompress(data, stat_msg_queue=None):
     results = []
     while True:
         decomp = lzma.LZMADecompressor(0, None, None)
@@ -163,7 +179,7 @@ def lzma_decompress(data):
     return b"".join(results)
 
 
-def bz2_decompress(data):
+def bz2_decompress(data, stat_msg_queue):
     decompressor = bz2.BZ2Decompressor()
 
     results = bytearray()

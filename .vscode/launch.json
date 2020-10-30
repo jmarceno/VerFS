@@ -3,31 +3,15 @@
     // Hover to view descriptions of existing attributes.
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
-    "configurations": [
+    "configurations": [                
         {
-            "name": "Python: Current File",
+            "name": "VeratyFS Debug",
             "type": "python",
             "request": "launch",
-            "program": "${file}",
+            "program": "VeratyFS.py",
             "console": "integratedTerminal",
-            "args": [
-                "X:",
-                "-l",
-                "jardelFS"
-            ]
-        },
-        {
-            "name": "Python: Current File - Debug Verbose",
-            "type": "python",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "args": [
-                "-d",
-                "-v",
-                "X:",
-                "-l",
-                "jardelFS"
+            "args": [                
+                "/home/jardel/fsteste"
             ]
         }
     ]

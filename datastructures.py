@@ -1,31 +1,27 @@
-import debugpy
-debugpy.debug_this_thread()
+# import debugpy
+# debugpy.debug_this_thread()
 
 import traceback
 from BTrees import IOBTree
 from collections import deque
 import time
 from compression import compress_data
-
 import os
 import _pickle as cPickle
 import json
 import base64
 
-import persistent
-import transaction
-import ZODB
-import ZODB.FileStorage
+from sqlitedict import SqliteDict
+from os import path
 
+small_block_db_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "small_blocks.sqlite")
 
-class MyBTree(IOBTree.BTree):
-    max_leaf_size = 500
-    max_internal_size = 1000
 
 class Garbage_Collector:
     def __init__(self):
         self.add_uses = deque()  # Hash of blocks that should receive an additional use counter
         self.remove_uses = deque() # Hash of blocks that should have their uses counter decreased
+
 
 class DataStore:
     def __init__(self, _chunk, _chunk_size, _path):
@@ -57,6 +53,30 @@ class QueuedWrite:
 
         return d
 
+
+class File_Inode:
+    def __init__(self, _id):
+        self.id = _id
+        self.uid = 0
+        self.gid = 0
+        self.mode = 0
+        self.mtime_ns = time.time_ns()
+        self.atime_ns = time.time_ns()
+        self.ctime_ns = time.time_ns()
+        self.target = ""
+        self.size = 0
+        self.rdev = 0
+        self.data = [] # List of FileBlock 's
+
+
+class Directory_Inode:
+    def __init__(self, inode):        
+        # self.row_id = row_id
+        self.name = ""
+        self.inode = inode
+        self.parent_inode = None
+    
+
 class Block:
     def __init__(self):
         self.chunk = 0
@@ -67,7 +87,7 @@ class Block:
         self.uses = 1
         self.compressed = False
         self.DELETED = False
-        self.DELETION_TIME = time.time()
+        self.DELETION_TIME = str(time.time())
 
 
 class FileBlock:
@@ -84,47 +104,78 @@ class SmallBlock:
         self.uses = 1
         self.compressed = False
         self.DELETED = False
-        self.DELETION_TIME = time.time()
-
+        self.DELETION_TIME = str(time.time())
     
         if _size == _deflated_size:
             self.compressed = True
 
 
-def write_small_block(_hash, data):
-    debugpy.debug_this_thread()
-
-    directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
-    full_path = os.path.join(directory, _hash)
-
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+def write_small_block(_hash, data, stat_msg_queue):    
+    # if not os.path.exists(directory):
+    #     try:
+    #         os.makedirs(directory)
+    #     except FileExistsError:
+    #         pass    
     
-    w = 0
-    with open(full_path, "wb") as f:        
-        w = f.write(data)
+    with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
+        smbs[_hash] = data
+        smbs.commit()        
     
-    return w        
+    return len(data)
+    
 
+# def write_small_block(_hash, data, stat_msg_queue):
+#     # debugpy.debug_this_thread()
 
-def read_small_block(_hash):
-    debugpy.debug_this_thread()
-    directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
-    full_path = os.path.join(directory, _hash)
+#     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
+#     full_path = os.path.join(directory, _hash)
 
-    with open(full_path, "rb") as small_block:
-        return small_block.read()
+#     if not os.path.exists(directory):
+#         try:
+#             os.makedirs(directory)
+#         except FileExistsError:
+#             pass
+    
+#     w = 0
+#     with open(full_path, "wb") as f:        
+#         w = f.write(data)
+    
+#     return w        
 
+def read_small_block(_hash, stat_msg_queue):    
+    with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
+        try:
+            return smbs[_hash]
+        except:
+            return False
 
-def delete_small_block(_hash):
-    debugpy.debug_this_thread()
-    directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
-    full_path = os.path.join(directory, _hash)
+# def read_small_block(_hash, stat_msg_queue):
+#     # debugpy.debug_this_thread()
+#     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
+#     full_path = os.path.join(directory, _hash)
 
-    try:
-        os.remove(full_path)
-        return True
-    except Exception:
-        print(traceback.format_exc())
-        return False
+#     with open(full_path, "rb") as small_block:
+#         return small_block.read()
+
+def delete_small_block(_hash, stat_msg_queue):    
+    with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
+        try:
+            del smbs[_hash]
+            smbs.commit()
+            return True
+        except:
+            print(traceback.format_exc())
+            return False
+
+# def delete_small_block(_hash, stat_msg_queue):
+#     # debugpy.debug_this_thread()
+#     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
+#     full_path = os.path.join(directory, _hash)
+
+#     try:
+#         os.remove(full_path)
+#         return True
+#     except Exception:
+#         print(traceback.format_exc())
+#         return False
     
