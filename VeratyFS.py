@@ -955,7 +955,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
 
             if os.path.isfile(datastore[_chunk].path):
                 with open(datastore[_chunk].path, "r+b", buffering=over_read_limit) as f:
-                    mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)
+                    mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_READ)
                     mm.seek(_block)
                     r = mm.read(read_size + over_read_limit)
                     # mm.madvise(mmap.MADV_DONTNEED)
