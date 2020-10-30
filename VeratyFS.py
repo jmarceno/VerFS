@@ -456,39 +456,59 @@ class Operations(pyfuse3.Operations):
             start_blk = 0
             start_diff = 0
             end_blk = 0
-            end_diff = 0
+            end_diff = 0                        
+            
+            blks = [0]
+            # [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
+            [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
+            blks.pop(0)
+            
+            
+            blk, blk_number = take_closest(blks, offset)            
+            if blk == offset:
+                start_blk = blk_number + 1
+            else:
+                start_blk = blk_number
+                start_diff = blk - offset                                    
 
-            internal_offset = 0
-            for blk_number, blk in enumerate(self.inodes[fh].data):
-                internal_offset = internal_offset + blk.size
-                if internal_offset < offset:
-                    continue
-                elif internal_offset == offset:
-                    start_blk = blk_number + 1
-                    break
-                else:
-                    start_blk = blk_number
-                    start_diff = internal_offset - offset                    
-                    break
+            
+            blk_e, blk_number_e = take_closest(blks, end_offset)                        
+            if blk_e == end_offset:
+                end_blk = blk_number_e
+            else:
+                end_diff = blk_e - end_offset
+                end_blk = blk_number_e
 
-            internal_offset_e = 0
-            for blk_number_e, blk_e in enumerate(self.inodes[fh].data):
-                internal_offset_e = internal_offset_e + blk_e.size
-                if internal_offset_e < end_offset:
-                    continue
-                elif internal_offset_e == end_offset:
-                    end_blk = blk_number_e
-                    break
-                else:
-                    end_diff = internal_offset_e - end_offset
-                    end_blk = blk_number_e
+            # internal_offset = 0
+            # for blk_number, blk in enumerate(blks):
+            #     # internal_offset = internal_offset + blk
+            #     if blk < offset:
+            #         continue
+            #     elif blk == offset:
+            #         start_blk = blk_number + 1
+            #         break
+            #     else:
+            #         start_blk = blk_number
+            #         start_diff = blk - offset                    
+            #         break
 
-                    break
+            # internal_offset_e = 0
+            # for blk_number_e, blk_e in enumerate(blks):
+            #     # internal_offset_e = internal_offset_e + blk_e
+            #     if blk_e < end_offset:
+            #         continue
+            #     elif blk_e == end_offset:
+            #         end_blk = blk_number_e
+            #         break
+            #     else:
+            #         end_diff = blk_e - end_offset
+            #         end_blk = blk_number_e
+            #         break
 
             if start_blk == 0 and end_blk == 0: 
                 data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
-                print("Time taken -> " + str(time.time()-start) + " Data Length:" + str(len(data)))                       
-                return data
+                # print("Time taken -> " + str(time.time()-start) + " Data Length:" + str(len(data)))                       
+                # return data
             else:
                 data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
 
