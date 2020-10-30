@@ -59,6 +59,7 @@ from configurations import *
 from persistence import init_persistance, persist_data
 from stats import unix_memory, resident, stacksize
 import mq_client
+from utils import take_closest
 
 # datastore, free_blocks, key_index, hash_table, fs_meta, GC = init_persistance()
 
@@ -927,7 +928,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
     start_time = time.time()
     bytes_processed = 0
 
-    for idx, b in enumerate(blklst):
+    for idx, b in enumerate(blklst[start_block:end_block]):
         if idx < start_block:
             continue            
         elif idx > end_block:
@@ -1006,6 +1007,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
             bytes_processed = bytes_processed + len(d)
             
     stat_msg_queue.put({'INFO:ReadSpeed' : str(bytes_processed/ (time.time()- start_time))})
+    print(str(bytes_processed/ (time.time()- start_time)))
     
     try:        
         del cached
@@ -1173,7 +1175,7 @@ async def persist(stat_msg_queue):
         p.start()
         bbw_threads.append(p)
    
-    time.sleep(5)
+    await trio.sleep(5)
     last_time = time.time()    
     while True:
         if (time.time() - last_time > gc_interval or len(write_buffer) > write_buffer_size) and not write_buffer_lock:    
@@ -1234,7 +1236,7 @@ async def persist(stat_msg_queue):
 async def usage(stat_msg_queue):
     mem = virtual_memory()
 
-    time.sleep(30)
+    await trio.sleep(1)
     last_time = time.time()    
     while True:        
         if (time.time() - last_time > usage_interval):  
