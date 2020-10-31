@@ -66,7 +66,8 @@ class File_Inode:
         self.target = ""
         self.size = 0
         self.rdev = 0
-        self.data = [] # List of FileBlock 's
+        self.data = [] # List of FileBlock 's        
+        self.offsets = []
 
 
 class Directory_Inode:

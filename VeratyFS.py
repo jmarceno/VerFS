@@ -59,7 +59,13 @@ from configurations import *
 from persistence import init_persistance, persist_data
 from stats import unix_memory, resident, stacksize
 import mq_client
-from utils import take_closest
+from utils import take_closest, offsets
+
+import builtins
+import line_profiler
+prof = line_profiler.LineProfiler()
+builtins.__dict__['profile'] = prof
+
 
 # datastore, free_blocks, key_index, hash_table, fs_meta, GC = init_persistance()
 
@@ -433,9 +439,9 @@ class Operations(pyfuse3.Operations):
         
         return await self.getattr(inode)
 
-    
+    @profile
     async def read(self, fh, offset, length): 
-        start = time.time()       
+        start_time = time.time()       
         # f = None
 
         # f = [x for x in self.inodes.values()  if x.id == fh]
@@ -459,13 +465,13 @@ class Operations(pyfuse3.Operations):
             end_blk = 0
             end_diff = 0                        
             
-            blks = [0]
+            # blks = [0]
+            # # [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
             # [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
-            [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
-            blks.pop(0)
+            # blks.pop(0)
             
             
-            blk, blk_number = take_closest(blks, offset)            
+            blk, blk_number = take_closest(self.inodes[fh].offsets, offset)            
             if blk == offset:
                 start_blk = blk_number + 1
             else:
@@ -473,7 +479,7 @@ class Operations(pyfuse3.Operations):
                 start_diff = blk - offset                                    
 
             
-            blk_e, blk_number_e = take_closest(blks, end_offset)                        
+            blk_e, blk_number_e = take_closest(self.inodes[fh].offsets, end_offset)                        
             if blk_e == end_offset:
                 end_blk = blk_number_e
             else:
@@ -535,7 +541,9 @@ class Operations(pyfuse3.Operations):
         if data is None:
             data = b''
 
-        print("Time taken -> " + str(time.time()-start) + " Data Length:" + str(len(data)))
+        print(humanbytes(len(data)/ (time.time()- start_time))+"MB/s")
+        # print("Time taken -> " + str(time.time()-start) + " Data Length:" + str(len(data)))
+        self.stat_msg_queue.put({'INFO:ReadSpeed' : str(len(data)/ (time.time()- start_time))})
 
         return data
     
@@ -552,9 +560,15 @@ class Operations(pyfuse3.Operations):
             f.size = end_offset #TODO: SETAR TAMANHO DO ARQUIVO DE FORMA CORRETA
 
         f.data += dedup(buf, self.stat_msg_queue)
+
+
+        f.offsets = [0]
+        [f.offsets.append(x.size+f.offsets[len(f.offsets)-1]) for x in f.data]
+        f.offsets.pop(0)
         
         self.inodes[fh].data = f.data
-        self.inodes[fh].size = f.size
+        self.inodes[fh].size = f.size                
+        self.inodes[fh].offsets = f.offsets
         # self.inodes.update({fh, f})       
         
         inodes = self.inodes    # Coloca os dados do FS de volta na memória compartilhada para pode ser acessada e persistida
@@ -928,19 +942,20 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
     start_time = time.time()
     bytes_processed = 0
 
-    for idx, b in enumerate(blklst[start_block:end_block]):
-        if idx < start_block:
-            continue            
-        elif idx > end_block:
-            return data
+    #for idx, b in enumerate(blklst[start_block:end_block]):
+    for b in blklst[start_block:end_block+1]:
+        # if idx < start_block:
+        #     continue            
+        # elif idx > end_block:
+        #     return data
 
-        if idx >= start_block:            
-            d = seek_in_cache(b.hash)
-            if d is not None:
-                if len(d) != b.size:
-                    print("DEBUG: Invalid data on cache entry")
-                    d = None
-                    del read_cache[b.hash]
+    # if idx >= start_block:            
+        d = seek_in_cache(b.hash)
+        if d is not None:
+            if len(d) != b.size:
+                print("DEBUG: Invalid data on cache entry")
+                d = None
+                del read_cache[b.hash]
         if d is None and len(r) > b.size:
             if hash_data(r[:hash_table[b.hash].size]) == b.hash:
                 d = r[:b.size]
@@ -1006,8 +1021,8 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
             data += d
             bytes_processed = bytes_processed + len(d)
             
-    stat_msg_queue.put({'INFO:ReadSpeed' : str(bytes_processed/ (time.time()- start_time))})
-    print(str(bytes_processed/ (time.time()- start_time)))
+    # stat_msg_queue.put({'INFO:ReadSpeed' : str(bytes_processed/ (time.time()- start_time))})
+    # print(str(humanbytes(bytes_processed/ (time.time()- start_time))))
     
     try:        
         del cached
@@ -1015,7 +1030,6 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
         del start_time
         del bytes_processed
         del d
-        del idx
         del b
     except:
         pass
@@ -1094,6 +1108,8 @@ async def parent(stat_msg_queue):
             print("Start: Usage...")
             nursery.start_soon(usage, stat_msg_queue)
             
+        except KeyboardInterrupt:
+            sys.exit(-1)
         except:
             print(traceback.format_exc())
 
@@ -1247,6 +1263,7 @@ async def usage(stat_msg_queue):
             stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
             last_time = time.time()
         await trio.sleep(30)
+        prof.dump_stats('profile.lprof')        
 
 
 '''
@@ -1285,10 +1302,13 @@ if __name__ == '__main__':
     try:
         par = partial(parent, stat_msg_queue=stat_msg_queue)
         trio.run(par)    
-    except:
-        pyfuse3.close(unmount=False)
+    except KeyboardInterrupt:
+        pyfuse3.close(unmount=True)
         print(traceback.format_exc())
         print("TODO: REDO THAT FOR MP - Persisting remaining data...")
+        os.system("clear")
+        prof.print_stats()
+
         # if len(write_buffer) > 0 and not write_buffer_lock:
         #     pass
         # persist_data([inodes, contents], stat_msg_queue)
