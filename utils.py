@@ -26,9 +26,14 @@ def take_closest(myList, myNumber):
 
 @jit(nopython=True) # Set "nopython" mode for best performance, equivalent to @njit
 def offsets(data):
-    
-    offsets = List()
-    [offsets.append(x+offsets[len(offsets)-1]) for x in data]
-    offsets.pop(0)
 
-    return offsets
+    offs = List()
+    offs.append(0)
+    [offs.append(x[1]+offs[len(offs)-1]) for x in data]
+    offs.pop(0)
+    
+    # offsets = List()
+    # [offsets.append(x+offsets[len(offsets)-1]) for x in data]
+    # offsets.pop(0)
+
+    return offs

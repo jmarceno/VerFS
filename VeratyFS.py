@@ -60,6 +60,7 @@ from persistence import init_persistance, persist_data
 from stats import unix_memory, resident, stacksize
 import mq_client
 from utils import take_closest, offsets
+from numba import jit
 
 import builtins
 import line_profiler
@@ -439,7 +440,7 @@ class Operations(pyfuse3.Operations):
         
         return await self.getattr(inode)
 
-    @profile
+    
     async def read(self, fh, offset, length): 
         start_time = time.time()       
         # f = None
@@ -465,19 +466,19 @@ class Operations(pyfuse3.Operations):
             end_blk = 0
             end_diff = 0                        
             
-            # blks = [0]
-            # # [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
-            # [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
-            # blks.pop(0)
-            
+            if len(self.inodes[fh].offsets) == 0:
+                blks = [0]
+                # [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
+                [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
+                blks.pop(0)
+                self.inodes[fh].offsets  = blks
             
             blk, blk_number = take_closest(self.inodes[fh].offsets, offset)            
             if blk == offset:
                 start_blk = blk_number + 1
             else:
                 start_blk = blk_number
-                start_diff = blk - offset                                    
-
+                start_diff = blk - offset
             
             blk_e, blk_number_e = take_closest(self.inodes[fh].offsets, end_offset)                        
             if blk_e == end_offset:
@@ -547,6 +548,7 @@ class Operations(pyfuse3.Operations):
 
         return data
     
+    @profile    
     async def write(self, fh, offset, buf):        
         buf = memoryview(buf)
         f = None
@@ -559,16 +561,18 @@ class Operations(pyfuse3.Operations):
         if end_offset > f.size:
             f.size = end_offset #TODO: SETAR TAMANHO DO ARQUIVO DE FORMA CORRETA
 
-        f.data += dedup(buf, self.stat_msg_queue)
+        data = f.data
+        data += dedup(buf, self.stat_msg_queue)
 
+        # offs = offsets(data)
 
-        f.offsets = [0]
-        [f.offsets.append(x.size+f.offsets[len(f.offsets)-1]) for x in f.data]
-        f.offsets.pop(0)
+        # offs = [0]
+        # [offs.append(x.size+offs[len(offs)-1]) for x in data]
+        # offs.pop(0)
         
-        self.inodes[fh].data = f.data
+        self.inodes[fh].data = data
         self.inodes[fh].size = f.size                
-        self.inodes[fh].offsets = f.offsets
+        self.inodes[fh].offsets = []
         # self.inodes.update({fh, f})       
         
         inodes = self.inodes    # Coloca os dados do FS de volta na memória compartilhada para pode ser acessada e persistida
@@ -869,7 +873,6 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
         # print("DEBUG: Write Queue has been processed. " + str(registers_processed) + " registers")
         # print("DEBUG: Processed -> "+humanbytes(bytes_processed)+" in "+humanbytes(bytes_processed/(time.time()-start_time))+" /s")    
     
-
 
 def dedup(data, stat_msg_queue):    
     global datastore
