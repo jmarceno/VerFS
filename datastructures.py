@@ -56,26 +56,28 @@ class QueuedWrite:
 
 class File_Inode:
     def __init__(self, _id):
-        self.id = _id
+        self.inode = _id        
+        self.parent_inode = 0
+        self.name = ""
+        self.target = ""
         self.uid = 0
         self.gid = 0
         self.mode = 0
         self.mtime_ns = time.time_ns()
         self.atime_ns = time.time_ns()
-        self.ctime_ns = time.time_ns()
-        self.target = ""
+        self.ctime_ns = time.time_ns()        
         self.size = 0
         self.rdev = 0
         self.data = [] # List of FileBlock 's        
         self.offsets = []
 
 
-class Directory_Inode:
-    def __init__(self, inode):        
-        # self.row_id = row_id
-        self.name = ""
-        self.inode = inode
-        self.parent_inode = None
+# class Directory_Inode:
+#     def __init__(self, inode):        
+#         # self.row_id = row_id
+#         self.name = ""
+#         self.inode = inode
+#         self.parent_inode = None
     
 
 class Block:
