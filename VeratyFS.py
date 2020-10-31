@@ -115,7 +115,7 @@ class Operations(pyfuse3.Operations):
         super(Operations, self).__init__()
         
         self.inode_open_count = defaultdict(int)
-        self.stat_msg_queue = stat_msg_queue
+        self.stat_msg_queue = stat_msg_queue        
                 
         try:
             if fs_meta is not None and fs_meta[0] is None or fs_meta[1] is None:
@@ -154,6 +154,7 @@ class Operations(pyfuse3.Operations):
 
 
     async def lookup(self, inode_p, name, ctx=None):
+        
         inode = None
         if name == '.':
             inode = inode_p
@@ -259,8 +260,10 @@ class Operations(pyfuse3.Operations):
         if not d:
             for k, v in self.inodes.items(): #TODO: BISECT ?
                 if v.name == name and v.parent_inode == inode_p:
-                    try:                        
-                        del self.inodes[k]
+                    try:
+                        f = self.inodes.pop(k)
+                        for i in f.data:
+                            update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)                         
                         break
                     except KeyError:
                         print(traceback.format_exc())
@@ -270,7 +273,10 @@ class Operations(pyfuse3.Operations):
             for k, v in i_copy.items(): #TODO: BISECT ?
                 if (v.name == name and v.parent_inode == inode_p) or v.parent_inode == entry.st_ino:
                     try:
-                        del self.inodes[k]                        
+                        f = self.inodes.pop(k)
+                        for i in f.data:
+                            update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)
+                                                
                     except KeyError:
                         print(traceback.format_exc())
                         print("Key already removed? Index Inconsistance at self.inodes")
@@ -487,8 +493,12 @@ class Operations(pyfuse3.Operations):
         #     if self.inodes[i].id == fh:
         #         f = self.inodes[i]
         #         break
+        try:
+            l = len(self.inodes[fh].data)
+        except:
+            return b''
 
-        if len(self.inodes[fh].data) == 0:
+        if l == 0:
             data = b''
         
         else:        
@@ -578,7 +588,7 @@ class Operations(pyfuse3.Operations):
         if data is None:
             data = b''
 
-        print(humanbytes(len(data)/ (time.time()- start_time))+"/s")
+        # print(humanbytes(len(data)/ (time.time()- start_time))+"/s")
         # print("Time taken -> " + str(time.time()-start) + " Data Length:" + str(len(data)))
         self.stat_msg_queue.put({'INFO:ReadSpeed' : str(len(data)/ (time.time()- start_time))})
 
@@ -1302,7 +1312,7 @@ async def usage(stat_msg_queue):
             stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
             last_time = time.time()
         await trio.sleep(30)
-        prof.dump_stats('profile.lprof')        
+        # prof.dump_stats('profile.lprof')        
 
 
 '''
@@ -1332,9 +1342,8 @@ if __name__ == '__main__':
         pass
 
     fuse_options = set(pyfuse3.default_options)
-    fuse_options.add('fsname=VeratyFS')    
-    fuse_options.discard('default_permissions')
-    fuse_options.add('allow_other')
+    fuse_options.add('fsname=VeratyFS')        
+    fuse_options.discard('default_permissions')    
     # if options.debug_fuse:
     #     fuse_options.add('debug')    
     pyfuse3.init(operations, options.mountpoint, fuse_options)

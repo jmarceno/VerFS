@@ -99,7 +99,7 @@ def persist_data(fs=None, stat_msg_queue=None):
     if not compressed_pickle(gc_path, copy.copy(GC)):
         stat_msg_queue.put("DEBUG: Persistence of GC Deferred.")
     
-    if not compressed_pickle(fs_meta_path, fs):
+    if not compressed_pickle(fs_meta_path, copy.copy(fs)):
         stat_msg_queue.put("DEBUG: Persistence File System Meta Info Deferred.")
 
     return True
