@@ -548,7 +548,7 @@ class Operations(pyfuse3.Operations):
 
         return data
     
-    @profile    
+    
     async def write(self, fh, offset, buf):        
         buf = memoryview(buf)
         f = None

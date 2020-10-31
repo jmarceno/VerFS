@@ -66,6 +66,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
             ds.close()
 
             free_blocks.append(IOBTree.IOBTree())
+
     print("File System Ready")
     return datastore, free_blocks, key_index, hash_table, fs_meta, GC
 
