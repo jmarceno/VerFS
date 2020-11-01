@@ -227,6 +227,7 @@ class Operations(pyfuse3.Operations):
     async def opendir(self, inode, ctx):
         return inode
 
+    #@profile
     async def readdir(self, inode, off, token):
         dir_entries = []        
         # [dir_entries.append(self.inodes[x]) for y, x in enumerate(self.inodes,off) if self.inodes[x].parent_inode == inode]
@@ -1315,7 +1316,7 @@ async def usage(stat_msg_queue):
             stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
             last_time = time.time()
         await trio.sleep(30)
-        # prof.dump_stats('profile.lprof')        
+        prof.dump_stats('readdir_profile.lprof')        
 
 
 '''

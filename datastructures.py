@@ -71,7 +71,7 @@ class File_Inode:
         self.ctime_ns = time.time_ns()        
         self.size = 0
         self.rdev = 0
-        self.data = [] # List of FileBlock 's        
+        self.data = [] # Tuple with hash and size
         self.offsets = []
 
 
