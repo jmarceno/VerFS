@@ -74,13 +74,6 @@ class File_Inode:
         self.data = [] # Tuple with hash and size
         self.offsets = []
 
-
-# class Directory_Inode:
-#     def __init__(self, inode):        
-#         # self.row_id = row_id
-#         self.name = ""
-#         self.inode = inode
-#         self.parent_inode = None
     
 
 class Block:
