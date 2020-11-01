@@ -14,7 +14,10 @@ import base64
 from sqlitedict import SqliteDict
 from os import path
 
-small_block_db_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "small_blocks.sqlite")
+import lmdb
+
+max_map_size = (1073741824*1024)
+small_block_db_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "small_blocks")
 
 
 class Garbage_Collector:
@@ -56,26 +59,28 @@ class QueuedWrite:
 
 class File_Inode:
     def __init__(self, _id):
-        self.id = _id
+        self.inode = _id        
+        self.parent_inode = 0
+        self.name = ""
+        self.target = ""
         self.uid = 0
         self.gid = 0
         self.mode = 0
         self.mtime_ns = time.time_ns()
         self.atime_ns = time.time_ns()
-        self.ctime_ns = time.time_ns()
-        self.target = ""
+        self.ctime_ns = time.time_ns()        
         self.size = 0
         self.rdev = 0
-        self.data = [] # List of FileBlock 's        
+        self.data = [] # Tuple with hash and size
         self.offsets = []
 
 
-class Directory_Inode:
-    def __init__(self, inode):        
-        # self.row_id = row_id
-        self.name = ""
-        self.inode = inode
-        self.parent_inode = None
+# class Directory_Inode:
+#     def __init__(self, inode):        
+#         # self.row_id = row_id
+#         self.name = ""
+#         self.inode = inode
+#         self.parent_inode = None
     
 
 class Block:
@@ -112,71 +117,35 @@ class SmallBlock:
 
 
 def write_small_block(_hash, data, stat_msg_queue):    
-    # if not os.path.exists(directory):
-    #     try:
-    #         os.makedirs(directory)
-    #     except FileExistsError:
-    #         pass    
-    
-    with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
-        smbs[_hash] = data
-        smbs.commit()        
-    
-    return len(data)
-    
-
-# def write_small_block(_hash, data, stat_msg_queue):
-#     # debugpy.debug_this_thread()
-
-#     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
-#     full_path = os.path.join(directory, _hash)
-
-#     if not os.path.exists(directory):
-#         try:
-#             os.makedirs(directory)
-#         except FileExistsError:
-#             pass
-    
-#     w = 0
-#     with open(full_path, "wb") as f:        
-#         w = f.write(data)
-    
-#     return w        
-
-def read_small_block(_hash, stat_msg_queue):    
-    with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
+    env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
+    with env.begin(write=True) as txn:
         try:
-            return smbs[_hash]
-        except:
-            return False
-
-# def read_small_block(_hash, stat_msg_queue):
-#     # debugpy.debug_this_thread()
-#     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
-#     full_path = os.path.join(directory, _hash)
-
-#     with open(full_path, "rb") as small_block:
-#         return small_block.read()
-
-def delete_small_block(_hash, stat_msg_queue):    
-    with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
-        try:
-            del smbs[_hash]
-            smbs.commit()
-            return True
+            txn.put(_hash.encode(), data)
+            txn.commit()            
         except:
             print(traceback.format_exc())
-            return False
-
-# def delete_small_block(_hash, stat_msg_queue):
-#     # debugpy.debug_this_thread()
-#     directory = os.path.join(os.getcwd(), 'metadata', 'smbs', _hash[0:2], _hash[2:4] )
-#     full_path = os.path.join(directory, _hash)
-
-#     try:
-#         os.remove(full_path)
-#         return True
-#     except Exception:
-#         print(traceback.format_exc())
-#         return False
+            return 0
     
+    return len(data)
+
+
+def read_small_block(_hash, stat_msg_queue):    
+    try:
+        env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
+        with env.begin() as txn:
+            with txn.cursor() as curs:
+                return txn.get(_hash.encode())
+    except:
+        print(traceback.format_exc())
+        return False
+    
+
+def delete_small_block(_hash, stat_msg_queue):
+    try:
+        env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
+        with env.begin(write=True) as txn:
+            txn.delete(_hash.encode())
+            return True
+    except:
+        print(traceback.format_exc())
+        return False

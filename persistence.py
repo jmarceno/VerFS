@@ -66,6 +66,7 @@ def init_persistance(_fs_meta=None, _keys=None, _datastore=None, _hash=None, _fr
             ds.close()
 
             free_blocks.append(IOBTree.IOBTree())
+
     print("File System Ready")
     return datastore, free_blocks, key_index, hash_table, fs_meta, GC
 
@@ -98,7 +99,7 @@ def persist_data(fs=None, stat_msg_queue=None):
     if not compressed_pickle(gc_path, copy.copy(GC)):
         stat_msg_queue.put("DEBUG: Persistence of GC Deferred.")
     
-    if not compressed_pickle(fs_meta_path, fs):
+    if not compressed_pickle(fs_meta_path, copy.copy(fs)):
         stat_msg_queue.put("DEBUG: Persistence File System Meta Info Deferred.")
 
     return True

@@ -26,7 +26,7 @@ free_blocks = []
 GC = Garbage_Collector()
 
 inodes = {} #IOBTree.IOBTree()
-contents = {} #OOBTree.OOBTree() #IOBTree.IOBTree()
+# contents = {} #OOBTree.OOBTree() #IOBTree.IOBTree()
 
 # Buffer de escrita em multiplos da unidade de alocacao
 # sendo assim os arquivos serão persistidos a cada X blocos/unidades de alocacao, sendo X o write_buffer_size ou a cada
