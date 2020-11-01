@@ -118,14 +118,13 @@ class Operations(pyfuse3.Operations):
         self.stat_msg_queue = stat_msg_queue        
                 
         try:
-            if fs_meta is not None and fs_meta[0] is None or fs_meta[1] is None:
+            if fs_meta is None:
                 self.inodes = inodes                
                 self.init_file_system()
             else:
                 self.inodes = fs_meta                
         except TypeError:
-            self.inodes = inodes
-            # self.contents = contents
+            self.inodes = inodes            
             self.init_file_system()           
 
 
@@ -164,11 +163,15 @@ class Operations(pyfuse3.Operations):
         #     raise(pyfuse3.FUSEError(errno.ENOENT))
         else:
             try: 
-                inode = [x[1].inode for x in self.inodes.items() if x[1].parent_inode==inode_p and x[1].name==name]
-                if len(inode) > 0:
-                    inode = inode[0]
-                else:
-                    inode = None
+                for x in self.inodes.items():
+                    if x[1].parent_inode==inode_p and x[1].name==name:
+                        inode = x[1].inode
+                        break                        
+                # inode = [x[1].inode for x in self.inodes.items() if x[1].parent_inode==inode_p and x[1].name==name]
+                # if len(inode) > 0:
+                #     inode = inode[0]
+                # else:
+                #     inode = None
                 # [inode for x in self.inodes.items() if x[1].parent_inode==inode_p]               
                 # for i in self.inodes:
                 #     if self.inodes[i].name == name and self.inodes[i].parent_inode ==  inode_p:
