@@ -26,6 +26,7 @@ free_blocks = []
 GC = Garbage_Collector()
 
 inodes = {} #IOBTree.IOBTree()
+dirs = {}
 # contents = {} #OOBTree.OOBTree() #IOBTree.IOBTree()
 
 # Buffer de escrita em multiplos da unidade de alocacao
@@ -49,9 +50,9 @@ small_block_read_cache =LRU(maxlen=small_block_cache_size)
 dummy_mult = 1024
 dummy_allocation_unit = 1024*dummy_mult
 allocation_unit = 1024
-min_blk_size = allocation_unit*32
-mean_blk_size = allocation_unit*64
-max_blk_size = allocation_unit*128
+min_blk_size = allocation_unit*16
+mean_blk_size = allocation_unit*32
+max_blk_size = allocation_unit*64
 small_block_limit = min_blk_size // 4    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
 partition_size = 80  # Partion size in GB

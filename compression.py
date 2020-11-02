@@ -95,7 +95,7 @@ def decompress_pickle(_file, format=4, stat_msg_queue=None):
         #     return pickle.load(data)
 
 
-def compress_data(data, _format=1, stat_msg_queue=None):
+async def compress_data(data, _format=1, stat_msg_queue=None):
     """
 
     :param data:
@@ -106,21 +106,34 @@ def compress_data(data, _format=1, stat_msg_queue=None):
     if _format == 1:
         cp_data = frame.compress(data, compression_level=lz4_compression_level)
         if len(cp_data) < len(data):
-            if len(cp_data) / len(data) < compression_trigger:                
-                return True, cp_data
-            else:
-                return False, data
+            # if len(cp_data) / len(data) < compression_trigger:                
+            return True, cp_data
+            # else:
+            #     return False, data
         else:
             return False, data
     elif _format == 2:
-        return zlib.compress(data, zlib_compression_level)
+        try:
+            comp = zlib.compressobj(level=1, strategy=zlib.Z_FIXED)
+            cp_data = comp.compress(data)
+            cp_data = cp_data + comp.flush()
+            if len(cp_data) < len(data):
+                if len(cp_data) / len(data) < compression_trigger:
+                    return True, cp_data
+                else:
+                    return False, data
+            else:
+                return False, data
+        except:
+            return False, data
+        # return zlib.compress(data, zlib_compression_level)
     elif _format == 3:
         return lzma.compress(data, filters=lzma_filters)
     elif _format == 4:
         return bz2.compress(data, bz2_compression_level)
 
 
-def decompress_data(data, _format=1, stat_msg_queue=None):
+async def decompress_data(data, _format=1, stat_msg_queue=None):
     """
 
     :param data:

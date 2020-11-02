@@ -4,7 +4,7 @@ import hashlib
 
 from configurations import min_blk_size, mean_blk_size, max_blk_size
 
-def hashed_chunks(data, fat=True, hf=xxhash.xxh3_64):
+async def hashed_chunks(data, fat=True, hf=xxhash.xxh3_64):
     return list(fastcdc(data, min_blk_size, mean_blk_size, max_blk_size, fat=fat, hf=hf))
 
 

@@ -110,35 +110,55 @@ class SmallBlock:
 
 
 def write_small_block(_hash, data, stat_msg_queue):    
-    env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
-    with env.begin(write=True) as txn:
-        try:
-            txn.put(_hash.encode(), data)
-            txn.commit()            
-        except:
-            print(traceback.format_exc())
-            return 0
-    
+    # env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
+    # with env.begin(write=True) as txn:
+    #     try:
+    #         txn.put(_hash.encode(), data)
+    #         txn.commit()            
+    #     except:
+    #         print(traceback.format_exc())
+    #         return 0
+    try:
+        with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
+            smbs[_hash] = data
+            smbs.commit()
+    except:
+        print(traceback.format_exc())
+
     return len(data)
 
 
 def read_small_block(_hash, stat_msg_queue):    
-    try:
-        env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
-        with env.begin() as txn:
-            with txn.cursor() as curs:
-                return txn.get(_hash.encode())
-    except:
-        print(traceback.format_exc())
-        return False
+    # try:
+    #     env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
+    #     with env.begin() as txn:
+    #         with txn.cursor() as curs:
+    #             return txn.get(_hash.encode())
+    # except:
+    #     print(traceback.format_exc())
+    #     return False   
+    with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
+        try:
+            return smbs[_hash]
+        except:
+            print(traceback.format_exc())
+            return False
     
 
 def delete_small_block(_hash, stat_msg_queue):
-    try:
-        env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
-        with env.begin(write=True) as txn:
-            txn.delete(_hash.encode())
+    # try:
+    #     env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
+    #     with env.begin(write=True) as txn:
+    #         txn.delete(_hash.encode())
+    #         return True
+    # except:
+    #     print(traceback.format_exc())
+    #     return False
+     with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
+        try:
+            del smbs[_hash]
+            smbs.commit()
             return True
-    except:
-        print(traceback.format_exc())
-        return False
+        except:
+            print(traceback.format_exc())
+            return False

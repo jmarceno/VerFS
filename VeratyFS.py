@@ -104,16 +104,49 @@ class Operations(pyfuse3.Operations):
         
         self.inode_open_count = defaultdict(int)
         self.stat_msg_queue = stat_msg_queue        
-                
+        
         try:
             if fs_meta is None:
-                self.inodes = inodes                
+                self.inodes = inodes               
                 self.init_file_system()
+                self.dirs = {}
             else:
-                self.inodes = fs_meta                
+                self.inodes = fs_meta[0]
+                self.dirs = fs_meta[1]
         except TypeError:
             self.inodes = inodes            
             self.init_file_system()           
+
+
+    def add_to_dir(self, inode_p, inode):
+        try:
+            self.dirs[inode_p].append(inode)
+            dirs = self.dirs
+            inodes = self.inodes
+            return True
+        except KeyError:            
+            self.dirs[inode_p] =  [inode]
+            dirs = self.dirs
+            inodes = self.inodes
+            return True
+        except:
+            print(traceback.format_exc())
+            return False
+
+    def remove_from_dir(self, inode_p, inode):
+        try:
+            for y, x in enumerate(self.dirs[inode_p]):
+                if x == inode:
+                    self.dirs[inode_p].pop(y)
+                    dirs = self.dirs
+                    inodes = self.inodes
+                    break
+            return True
+        except:
+            print(traceback.format_exc())
+            return False
+        
+        
 
 
     def init_file_system(self):
@@ -133,6 +166,8 @@ class Operations(pyfuse3.Operations):
 
         self.inodes[pyfuse3.ROOT_INODE] = new_file
 
+        self.add_to_dir(pyfuse3.ROOT_INODE, pyfuse3.ROOT_INODE)
+
 
     async def lookup(self, inode_p, name, ctx=None):
         
@@ -143,10 +178,14 @@ class Operations(pyfuse3.Operations):
             inode = self.inodes[inode_p]        
         else:
             try: 
-                for x in self.inodes.items():
-                    if x[1].parent_inode==inode_p and x[1].name==name:
-                        inode = x[1].inode
-                        break                                          
+                for x in self.dirs[inode_p]:
+                    if self.inodes[x].name == name:
+                        inode =  x #self.inodes[inode].inode
+                        break                
+
+                    # if x[1].parent_inode==inode_p and x[1].name==name:
+                    #     inode = x[1].inode
+                    #     break                                          
             except TypeError:                
                 raise(pyfuse3.FUSEError(errno.ENOENT))
             except AttributeError:
@@ -199,10 +238,12 @@ class Operations(pyfuse3.Operations):
 
     #@profile
     async def readdir(self, inode, off, token):
-        dir_entries = []                
-        [dir_entries.append(x[1]) for y,x in enumerate(self.inodes.items(), off) if x[1].parent_inode==inode]        
+        dir_entries = self.dirs[inode][off:]
+        # [dir_entries.append(x[1]) for y,x in enumerate(self.inodes.items(), off) if x[1].parent_inode==inode]        
+        #[dir_entries.append(x[1]) for y,x in enumerate(self.dirs[inode], off)]
         try:
-            pyfuse3.readdir_reply(token, dir_entries[off].name, await self.getattr(dir_entries[off].inode), off+1)
+            # pyfuse3.readdir_reply(token, dir_entries[off].name, await self.getattr(dir_entries[off].inode), off+1)
+            pyfuse3.readdir_reply(token, self.inodes[dir_entries[0]].name, await self.getattr(self.inodes[dir_entries[0]].inode), off+1)
         except IndexError:
             return False
 
@@ -231,6 +272,7 @@ class Operations(pyfuse3.Operations):
                 if v.name == name and v.parent_inode == inode_p:
                     try:
                         f = self.inodes.pop(k)
+                        self.remove_from_dir(f.parent_inode, f.inode)
                         for i in f.data:
                             update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)                         
                         break
@@ -243,6 +285,7 @@ class Operations(pyfuse3.Operations):
                 if (v.name == name and v.parent_inode == inode_p) or v.parent_inode == entry.st_ino:
                     try:
                         f = self.inodes.pop(k)
+                        self.remove_from_dir(f.parent_inode, f.inode)
                         for i in f.data:
                             update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)
                                                 
@@ -274,11 +317,17 @@ class Operations(pyfuse3.Operations):
 
         if target_exists:            
             self._replace(inode_p_old, name_old, inode_p_new, name_new, entry_old, entry_new)
+            self.add_to_dir(inode_p_old, entry_new.st_ino)
         else:
             old = self.inodes[inode_p_old]
+            self.remove_from_dir(inode_p_old,old.inode)
+
             old.name = name_new
             old.parent_inode = inode_p_new
             self.inodes[inode_p_old] = old
+            
+            self.add_to_dir(inode_p_new, old.inode)
+            
             
 
     def _replace(self, inode_p_old, name_old, inode_p_new, name_new, entry_old, entry_new):
@@ -287,11 +336,15 @@ class Operations(pyfuse3.Operations):
             if self.inodes[c].inode != inode_p_old and self.inodes[c].parent_inode == inode_p_old and self.inodes[c].name != name_old: # and str('.trashinfo.') not in str(name_new) and str('.trashinfo.') not in str(name_old):
                 raise pyfuse3.FUSEError(errno.ENOTEMPTY)
         
-        old = self.inodes.pop(entry_old.st_ino)        
+        old = self.inodes.pop(entry_old.st_ino)      
+        self.remove_from_dir(inode_p_old, entry_old.st_ino)  
+        
         old.name = name_new
         old.parent_inode = inode_p_new
         old.inode = max(self.inodes) + 1 #len(self.inodes)+1
         self.inodes[old.inode] = old
+
+        self.add_to_dir(inode_p_new, old.inode)
         
 
     async def link(self, inode, new_inode_p, new_name, ctx):
@@ -305,6 +358,7 @@ class Operations(pyfuse3.Operations):
         ni.parent_inode = new_inode_p
         ni.inode = inode
         self.inodes[inode] = ni
+        self.add_to_dir(new_inode_p, inode)
 
         return await self.getattr(inode)
 
@@ -411,6 +465,8 @@ class Operations(pyfuse3.Operations):
         new_file.name = name
         new_file.parent_inode = inode_p
         self.inodes[new_file.inode] = new_file
+
+        self.add_to_dir(inode_p, inode)
                         
         return await self.getattr(inode)
 
@@ -455,10 +511,10 @@ class Operations(pyfuse3.Operations):
                 end_blk = blk_number_e
 
             if start_blk == 0 and end_blk == 0: 
-                data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
+                data = await get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
                 
             else:
-                data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
+                data = await get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
 
                 if self.inodes[fh].size == end_offset:
                     data = data[-(end_offset-offset):]
@@ -500,14 +556,14 @@ class Operations(pyfuse3.Operations):
             f.size = end_offset #TODO: SETAR TAMANHO DO ARQUIVO DE FORMA CORRETA
 
         data = f.data
-        data += dedup(buf, self.stat_msg_queue)
+        data += await dedup(buf, self.stat_msg_queue)
         
         self.inodes[fh].data = data
         self.inodes[fh].size = f.size                
         self.inodes[fh].offsets = []
 
         
-        inodes = self.inodes    # Coloca os dados do FS de volta na memória compartilhada para pode ser acessada e persistida
+        # inodes = self.inodes            # Coloca os dados do FS de volta na memória compartilhada para pode ser acessada e persistida
 
         # snapshot = tracemalloc.take_snapshot()
         # top_stats = snapshot.statistics('lineno', cumulative=True)
@@ -685,7 +741,7 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
     return True
 
 
-def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
+async def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
     """
     Writes a series of blocks that where quede
 
@@ -708,24 +764,26 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
     while writing:
         try:            
             q = write_buffer.popleft()
-            if not q.result and q.hash not in hash_table:
+            if not q['result'] and q['hash'] not in hash_table:
                 try:
-                    if len(q.compressed_data) <= small_block_limit:
-                        if q.compressed:                            
-                            swq.put((q.hash, q.compressed_data))                                                        
-                            q.chunk = -1                            
+                    if len(q['compressed_data']) <= small_block_limit:
+                        if q['compressed']:                            
+                            swq.put((q['hash'], q['compressed_data']))
+                            q['chunk'] = -1
+                            q['block'] = -1
                         else:                            
-                            swq.put((q.hash, q.data))                            
-                            q.chunk = -1                        
+                            swq.put((q['hash'], q['data']))                            
+                            q['chunk'] = -1
+                            q['block'] = -1                        
                     else:
                         for idx, ds in enumerate(datastore):
                             if not ds.IS_FULL:
-                                q.block = ds.next_write_position
-                                if q.compressed:
-                                    ds.next_write_position = ds.next_write_position + len(q.compressed_data)
+                                q['block'] = ds.next_write_position
+                                if q['compressed']:
+                                    ds.next_write_position = ds.next_write_position + len(q['compressed_data'])
                                 else:
-                                    ds.next_write_position = ds.next_write_position + len(q.data)
-                                q.chunk = ds.chunk
+                                    ds.next_write_position = ds.next_write_position + len(q['data'])
+                                q['chunk'] = ds.chunk
                                 if ds.next_write_position + max_blk_size > ds.size:
                                     ds.IS_FULL = True
                                 break
@@ -735,7 +793,7 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
                                 for ds, fb in enumerate(free_blocks):
                                     try:                                    
                                         s = fb.minKey(len(q.compressed_data))
-                                        q.block = fb.get(s).pop(0)
+                                        q['block'] = fb.get(s).pop(0)
                                         if len(fb.get(s)) == 0:
                                             fb.pop(s)
                                             fragmentation['free_size'] = fragmentation['free_size'] - s
@@ -753,39 +811,39 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
                             print('Error sending data to the flusing queue')
                             print(traceback.format_exc())
                        
-                    q.result = True                    
-                    hash_table[q.hash] = Block()
-                    hash_table[q.hash].hash = q.hash
-                    hash_table[q.hash].chunk = q.chunk
-                    hash_table[q.hash].offset = q.block
-                    hash_table[q.hash].size = len(q.compressed_data)
-                    hash_table[q.hash].deflated_size = len(q.data)
-                    hash_table[q.hash].compressed = q.compressed
-                    update_index(q.hash, q.chunk, True, stat_msg_queue)
+                    q['result'] = True                    
+                    hash_table[q['hash']] = Block()
+                    hash_table[q['hash']].hash = q['hash']
+                    hash_table[q['hash']].chunk = q['chunk']
+                    hash_table[q['hash']].offset = q['block']
+                    hash_table[q['hash']].size = len(q['compressed_data'])
+                    hash_table[q['hash']].deflated_size = len(q['data'])
+                    hash_table[q['hash']].compressed = q['compressed']
+                    update_index(q['hash'], q['chunk'], True, stat_msg_queue)
 
-                    if len(q.compressed_data) <= small_block_limit:
-                        small_block_read_cache[q.hash] = q.data
+                    if len(q['compressed_data']) <= small_block_limit:
+                        small_block_read_cache[q['hash']] = q['data']
 
                     try:
-                        del write_read_cache[q.hash]
+                        del write_read_cache[q['hash']]
                     except KeyError:
                         continue
 
                     registers_processed = registers_processed + 1
-                    if q.compressed:
-                        bytes_processed = bytes_processed + len(q.compressed_data)
+                    if q['compressed']:
+                        bytes_processed = bytes_processed + len(q['compressed_data'])
                     else:
-                        bytes_processed = bytes_processed + len(q.data)                    
+                        bytes_processed = bytes_processed + len(q['data'])      
                     continue                    
 
                 except Exception:
                     print(traceback.format_exc()) 
             else:                
                 registers_processed = registers_processed + 1                
-                if q.compressed:
-                    bytes_processed = bytes_processed + len(q.compressed_data)
+                if q['compressed']:
+                    bytes_processed = bytes_processed + len(q['compressed_data'])
                 else:
-                    bytes_processed = bytes_processed + len(q.data)                
+                    bytes_processed = bytes_processed + len(q['data'])
             del q
 
         except IndexError:
@@ -793,11 +851,11 @@ def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
             write_buffer_lock = False
     
     write_buffer_lock = False
-    
 
-def dedup(data, stat_msg_queue):    
-    global datastore
-    global free_blocks    
+@profile
+async def dedup(data, stat_msg_queue):    
+    # global datastore
+    # global free_blocks    
     global hash_table    
     global read_cache
     global write_buffer
@@ -819,23 +877,30 @@ def dedup(data, stat_msg_queue):
             if _hashed_data in hash_table:
                 blk_list[len(blk_list)-1] = FileBlock(_hashed_data, len(data))
                 update_index(_hashed_data)
-            else:                
-                q = QueuedWrite(len(blk_list)-1, _hashed_data, bytearray(data))
-                blk_list[q.idx] = FileBlock(_hashed_data, len(data))
+            else:
+                q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': bytearray(data), 'result': False}
+                q['compressed'], q['compressed_data'] = await compress_data(q['data'])
+                q['creation_time'] = time.time()
+
+                # q = QueuedWrite(len(blk_list)-1, _hashed_data, bytearray(data))
+                blk_list[q['idx']] = FileBlock(_hashed_data, len(data))
                 write_read_cache[_hashed_data] = data
                 write_buffer.append(q)
                 bytes_processed = bytes_processed + len(data)
         else:
-            ch = variable_chunks(data)
+            ch = await variable_chunks(memoryview(data))
             for c in ch:
                 blk_list.append(0)
 
                 if c.hash in hash_table:
                     blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
                     update_index(c.hash)
-                else:                
-                    q = QueuedWrite(len(blk_list)-1, c.hash, bytearray(c.data))
-                    blk_list[q.idx] = FileBlock(c.hash, len(c.data))
+                else:
+                    q = {'idx':len(blk_list)-1, 'hash':c.hash, 'data': bytearray(c.data), 'result': False}
+                    q['compressed'], q['compressed_data'] = await compress_data(q['data'])
+                    q['creation_time'] = time.time()
+                    # q = QueuedWrite(len(blk_list)-1, c.hash, bytearray(c.data))
+                    blk_list[q['idx']] = FileBlock(c.hash, len(c.data))
                     write_read_cache[c.hash] = c.data
                     write_buffer.append(q)
 
@@ -852,7 +917,7 @@ def dedup(data, stat_msg_queue):
     return blk_list
 
 
-def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offset=0, end_offset=0):    
+async def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offset=0, end_offset=0):    
     global datastore
     global allocation_unit
     global hash_table
@@ -884,7 +949,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
             try:
                 d = read_small_block(b.hash, stat_msg_queue)
                 if hash_table[b.hash].compressed:
-                        d = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read                    
+                        d = await decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read                    
                 small_block_read_cache[b.hash] = d
             except Exception:
                 print(traceback.format_exc())
@@ -920,7 +985,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                 r = r[read_size:]
                 
                 if hash_table[b.hash].compressed:
-                        decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
+                        decompresed_data = await decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
                 else:
                     decompresed_data = d
 
@@ -971,8 +1036,8 @@ def chunks(lst, n):
         yield lst[i:i + n]
 
 
-def variable_chunks(data):
-    return hashed_chunks(data)
+async def variable_chunks(data):
+    return await hashed_chunks(data)
 
 '''
 
@@ -1054,20 +1119,20 @@ def write_to_disk(wq, resq, stat_msg_queue):
             try:
                 q, datastore = wq.get(False)                
                 
-                with open(datastore[q.chunk].path, "r+b") as f:
-                    mm = mmap.mmap(f.fileno(), length=datastore[q.chunk].size, access=mmap.ACCESS_WRITE)
+                with open(datastore[q['chunk']].path, "r+b") as f:
+                    mm = mmap.mmap(f.fileno(), length=datastore[q['chunk']].size, access=mmap.ACCESS_WRITE)
                     # for q, datastore in work:                    
-                    mm.seek(q.block)
-                    if q.compressed:                            
-                        written = mm.write(q.compressed_data)                        
+                    mm.seek(q['block'])
+                    if q['compressed']:
+                        written = mm.write(q['compressed_data'])
                     else:                            
-                        written = mm.write(q.data)                        
+                        written = mm.write(q['data'])           
                     # mm.madvise(mmap.MADV_DONTNEED)                    
                     mm.close()
                     del mm                    
                                     
             except ValueError:
-                print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q.chunk, q.block, len(q.compressed_data)))
+                print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q['chunk'], q['block'], len(q['compressed_data'])))
                 print(traceback.format_exc())
             except queue.Empty:
                 continue
@@ -1106,9 +1171,10 @@ async def persist(stat_msg_queue):
     while True:
         if (time.time() - last_time > gc_interval or len(write_buffer) > write_buffer_size) and not write_buffer_lock:    
             if len(write_buffer) > 0:                
-                await trio.to_thread.run_sync(write_new_blocks, write_buffer, wq, resq, swq, stat_msg_queue)
+                # await trio.to_thread.run_sync(write_new_blocks, write_buffer, wq, resq, swq, stat_msg_queue)
+                await write_new_blocks(write_buffer, wq, resq, swq, stat_msg_queue)
             await trio.to_thread.run_sync(garbage_collector, stat_msg_queue)
-            await trio.to_thread.run_sync(persist_data, inodes, stat_msg_queue)
+            await trio.to_thread.run_sync(persist_data, [inodes, dirs], stat_msg_queue)
             last_time = time.time()            
 
             for i, t in enumerate(smbw_threads):
