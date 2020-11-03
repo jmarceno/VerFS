@@ -42,9 +42,9 @@ usage_interval = 5 # Time in seconds to update the usage couters
 
 over_fetch_limit = 6  # 64 blocks of 16k = 1MB
 over_read_limit = 0 #2097152*10  # Number of bytes that will be read at each interaction of the read loop. This is effectivily a cache
-cache_size = 10000  # Cache size in entries. Memory size is ~cache_size*allocation_unit
+cache_size = 1  # Cache size in entries. Memory size is ~cache_size*allocation_unit
 read_cache = LRU(maxlen=cache_size)
-small_block_cache_size = 300000
+small_block_cache_size = 1
 small_block_read_cache =LRU(maxlen=small_block_cache_size)
 
 dummy_mult = 1024
@@ -78,7 +78,7 @@ identity_string = b'VeratyFS@v0.0.1@InLineDedup,FixedStoreSize,GC,Compression,Fi
 
 q_random = 2 # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue
 
-smb_write_threads = 3
-bb_write_threads = 3
+smb_write_threads = 1
+bb_write_threads = 2
 
 writer_thread_mem_limit = 1073741824 * 2

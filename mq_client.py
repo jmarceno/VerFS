@@ -35,5 +35,5 @@ def send_message(stat_msg_queue):
                         break
                 
         except:
-            print(traceback.format_exc())
+            #print(traceback.format_exc())
             continue

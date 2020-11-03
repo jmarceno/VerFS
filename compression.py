@@ -133,7 +133,7 @@ async def compress_data(data, _format=1, stat_msg_queue=None):
         return bz2.compress(data, bz2_compression_level)
 
 
-async def decompress_data(data, _format=1, stat_msg_queue=None):
+def decompress_data(data, _format=1, stat_msg_queue=None):
     """
 
     :param data:
