@@ -119,38 +119,40 @@ class Operations(pyfuse3.Operations):
                 self.dirs = fs_meta[1]
         except TypeError:
             print(traceback.format_exc())
-            # self.inodes = inodes
-            # self.dirs = dirs
-            # self.init_file_system()
+            self.inodes = inodes
+            self.dirs = dirs
+            self.init_file_system()
 
 
     def add_to_dir(self, inode_p, inode):
-        try:
-            self.dirs[str(inode_p)].append(inode)
-            dirs = self.dirs
-            inodes = self.inodes
-            return True
-        except KeyError:            
-            self.dirs[str(inode_p)] =  [inode]
-            dirs = self.dirs
-            inodes = self.inodes
-            return True
-        except:
-            print(traceback.format_exc())
-            return False
+        pass
+        # try:
+        #     self.dirs[inode_p].append(inode)
+        #     dirs = self.dirs
+        #     inodes = self.inodes
+        #     return True
+        # except KeyError:            
+        #     self.dirs[inode_p] =  [inode]
+        #     dirs = self.dirs
+        #     inodes = self.inodes
+        #     return True
+        # except:
+        #     print(traceback.format_exc())
+        #     return False
 
     def remove_from_dir(self, inode_p, inode):
-        try:
-            for y, x in enumerate(self.dirs[str(inode_p)]):
-                if x == inode:
-                    self.dirs[str(inode_p)].pop(y)
-                    dirs = self.dirs
-                    inodes = self.inodes
-                    break
-            return True
-        except:
-            print(traceback.format_exc())
-            return False
+        pass
+        # try:
+        #     for y, x in enumerate(self.dirs[inode_p]):
+        #         if x == inode:
+        #             self.dirs[inode_p].pop(y)
+        #             dirs = self.dirs
+        #             inodes = self.inodes
+        #             break
+        #     return True
+        # except:
+        #     print(traceback.format_exc())
+        #     return False
 
 
     def init_file_system(self):
@@ -168,7 +170,7 @@ class Operations(pyfuse3.Operations):
         new_file.parent_inode = pyfuse3.ROOT_INODE
         new_file.inode = pyfuse3.ROOT_INODE
 
-        self.inodes[str(pyfuse3.ROOT_INODE)] = new_file
+        self.inodes[pyfuse3.ROOT_INODE] = new_file
 
         self.add_to_dir(pyfuse3.ROOT_INODE, pyfuse3.ROOT_INODE)
 
@@ -179,11 +181,11 @@ class Operations(pyfuse3.Operations):
         if name == '.':
             inode = inode_p
         elif name == '..':
-            inode = self.inodes[str(inode_p)]
+            inode = self.inodes[inode_p]
         else:
             try: 
-                for x in self.dirs[str(inode_p)]:
-                    if self.inodes[str(x)].name == name:
+                for x in self.dirs[inode_p]:
+                    if self.inodes[x].name == name:
                         inode =  x #self.inodes[inode].inode
                         break                
 
@@ -205,7 +207,7 @@ class Operations(pyfuse3.Operations):
     async def getattr(self, inode, ctx=None):        
 
         try:
-            f = self.inodes[str(inode)]
+            f = self.inodes[inode]
 
             entry = pyfuse3.EntryAttributes()
             entry.st_ino = inode
@@ -227,7 +229,7 @@ class Operations(pyfuse3.Operations):
             entry.st_mtime_ns = f.mtime_ns
             entry.st_ctime_ns = f.ctime_ns
 
-            del f
+            # del f
         except KeyError:
             raise (pyfuse3.FUSEError(errno.ENOENT))
 
@@ -242,12 +244,12 @@ class Operations(pyfuse3.Operations):
 
     #@profile
     async def readdir(self, inode, off, token):
-        dir_entries = self.dirs[str(inode)][off:]
-        # [dir_entries.append(x[1]) for y,x in enumerate(self.inodes.items(), off) if x[1].parent_inode==inode]        
+        dir_entries = [] #self.dirs[inode][off:]
+        [dir_entries.append(x[1]) for y,x in enumerate(self.inodes.items(), off) if x[1].parent_inode==inode]        
         #[dir_entries.append(x[1]) for y,x in enumerate(self.dirs[inode], off)]
         try:
             # pyfuse3.readdir_reply(token, dir_entries[off].name, await self.getattr(dir_entries[off].inode), off+1)
-            pyfuse3.readdir_reply(token, self.inodes[str(dir_entries[0])].name, await self.getattr(self.inodes[str(dir_entries[0])].inode), off+1)
+            pyfuse3.readdir_reply(token, self.inodes[dir_entries[0]].name, await self.getattr(self.inodes[dir_entries[0]].inode), off+1)
         except IndexError:
             return False
 
@@ -276,7 +278,7 @@ class Operations(pyfuse3.Operations):
         
         if not d:
             for k, v in self.inodes.items(): #TODO: BISECT ?
-                if v.name == name and str(v.parent_inode) == str(inode_p):
+                if v.name == name and v.parent_inode == inode_p:
                     try:
                         f = self.inodes.pop(k)
                         self.remove_from_dir(f.parent_inode, f.inode)
@@ -289,7 +291,7 @@ class Operations(pyfuse3.Operations):
         else:
             i_copy = copy.copy(self.inodes)
             for k, v in i_copy.items(): #TODO: BISECT ?
-                if (v.name == name and v.parent_inode == inode_p) or str(v.parent_inode) == str(entry.st_ino):
+                if (v.name == name and v.parent_inode == inode_p) or v.parent_inode == entry.st_ino:
                     try:
                         f = self.inodes.pop(k)
                         self.remove_from_dir(f.parent_inode, f.inode)
@@ -326,12 +328,12 @@ class Operations(pyfuse3.Operations):
             self._replace(inode_p_old, name_old, inode_p_new, name_new, entry_old, entry_new)
             # self.add_to_dir(inode_p_old, entry_new.st_ino)
         else:
-            old = self.inodes[str(inode_p_old)]
+            old = self.inodes[inode_p_old]
             # self.remove_from_dir(inode_p_old,old.inode)
 
             old.name = name_new
             old.parent_inode = inode_p_new
-            self.inodes[str(inode_p_old)] = old
+            self.inodes[inode_p_old] = old
             
             self.add_to_dir(inode_p_new, old.inode)
             
@@ -369,18 +371,18 @@ class Operations(pyfuse3.Operations):
         ni.name = new_name
         ni.parent_inode = new_inode_p
         ni.inode = inode
-        self.inodes[str(inode)] = ni
+        self.inodes[inode] = ni
         self.add_to_dir(new_inode_p, inode)
 
         return await self.getattr(inode)
 
     async def setattr(self, inode, attr, fields, fh, ctx):
 
-        old_inode = self.inodes[str(inode)]
+        old_inode = self.inodes[inode]
 
         if fields.update_size:
             size = 0
-            f = self.inodes[str(inode)]
+            f = self.inodes[inode]
             for d in f.data:
                 size = size + d.size
             if size > 0:
@@ -407,7 +409,7 @@ class Operations(pyfuse3.Operations):
         else:
             old_inode.ctime_ns = time.time_ns()
             
-        self.inodes[str(inode)] = old_inode
+        self.inodes[inode] = old_inode
 
         return await self.getattr(inode)
 
@@ -425,7 +427,7 @@ class Operations(pyfuse3.Operations):
 
         size = 0
         for k in list(self.inodes.keys()):
-            size = size + self.inodes[str(k)].size
+            size = size + self.inodes[k].size
         stat_.f_blocks = max(0, (partition_size_gb // (stat_.f_frsize//dummy_mult)))
         # stat_.f_blocks = size // stat_.f_frsize
         stat_.f_bfree = max(0, (partition_size_gb - get_usage(self.stat_msg_queue)[2]) // allocation_unit )#stat_.f_blocks - (size // allocation_unit)
@@ -476,7 +478,7 @@ class Operations(pyfuse3.Operations):
         new_file.rdev = rdev
         new_file.name = name
         new_file.parent_inode = inode_p
-        self.inodes[str(new_file.inode)] = new_file
+        self.inodes[new_file.inode] = new_file
 
         self.add_to_dir(inode_p, inode)
                         
@@ -487,7 +489,7 @@ class Operations(pyfuse3.Operations):
         start_time = time.time()       
         
         try:
-            l = len(self.inodes[str(fh)].data)
+            l = len(self.inodes[fh].data)
         except:
             return b''
 
@@ -495,27 +497,27 @@ class Operations(pyfuse3.Operations):
             data = b''
         
         else:                    
-            end_offset = min(self.inodes[str(fh)].size, offset + length)
+            end_offset = min(self.inodes[fh].size, offset + length)
 
             start_blk = 0
             start_diff = 0
             end_blk = 0
             end_diff = 0                        
             
-            if len(self.inodes[str(fh)].offsets) == 0:
+            if len(self.inodes[fh].offsets) == 0:
                 blks = [0]                
-                [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[str(fh)].data]
+                [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
                 blks.pop(0)
-                self.inodes[str(fh)].offsets  = blks
+                self.inodes[fh].offsets  = blks
             
-            blk, blk_number = take_closest(self.inodes[str(fh)].offsets, offset)            
+            blk, blk_number = take_closest(self.inodes[fh].offsets, offset)            
             if blk == offset:
                 start_blk = blk_number + 1
             else:
                 start_blk = blk_number
                 start_diff = blk - offset
             
-            blk_e, blk_number_e = take_closest(self.inodes[str(fh)].offsets, end_offset)                        
+            blk_e, blk_number_e = take_closest(self.inodes[fh].offsets, end_offset)                        
             if blk_e == end_offset:
                 end_blk = blk_number_e
             else:
@@ -524,22 +526,22 @@ class Operations(pyfuse3.Operations):
 
             if start_blk == 0 and end_blk == 0:
                 if not whole:                    
-                    data = get_file_data(self.stat_msg_queue, self.inodes[str(fh)].data, start_blk, end_blk + 1)[offset:end_offset]
+                    data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
                 else:
                     if start_diff < 0:
                         start_blk = max(0, start_blk -1)
-                    data = get_file_data(self.stat_msg_queue, self.inodes[str(fh)].data, start_blk, end_blk + 1)[offset:end_offset]
+                    data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
                     
                     return start_diff, start_blk, end_blk, data
             else:
-                data = get_file_data(self.stat_msg_queue, self.inodes[str(fh)].data, start_blk, end_blk)
+                data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
 
                 if whole:
                     if start_diff < 0:
                         start_blk = max(0, start_blk -1)
                     return start_diff, start_blk, end_blk, data
 
-                if self.inodes[str(fh)].size == end_offset:
+                if self.inodes[fh].size == end_offset:
                     data = data[-(end_offset-offset):]
                 else:
                     if start_diff < 0:
@@ -547,7 +549,7 @@ class Operations(pyfuse3.Operations):
                     if start_blk == 0:
                         data = data[offset:]
                     elif offset > 0 and start_diff > 0:
-                        data = data[self.inodes[str(fh)].data[start_blk].size-start_diff:]
+                        data = data[self.inodes[fh].data[start_blk].size-start_diff:]
                     if end_diff > 0 and len(data) > (end_offset-offset):
                         data = data[:-end_diff]
             
@@ -570,7 +572,7 @@ class Operations(pyfuse3.Operations):
         buf = memoryview(buf)
         # f = None
 
-        f = self.inodes[str(fh)]
+        f = self.inodes[fh]
 
         # for i in list(self.inodes.keys()):
         #     if self.inodes.get(i).inode == fh:
@@ -583,10 +585,10 @@ class Operations(pyfuse3.Operations):
         if end_offset > f.size: # and offset==f.size:
             f.size = end_offset
 
-        if offset == 0 and len(self.inodes[str(fh)].offsets) > 0 or len(self.inodes[str(fh)].data) == 0 or end_offset == self.inodes[str(fh)].size or append == True:
+        if offset == 0 and len(self.inodes[fh].offsets) > 0 or len(self.inodes[fh].data) == 0 or end_offset == self.inodes[fh].size or append == True:
             data = f.data
             data += await dedup(buf, self.stat_msg_queue)
-            self.inodes[str(fh)].data = data
+            self.inodes[fh].data = data
         
         else: # offset != 0:
             start_diff, start_block, end_block, data = await self.read(fh, offset, len(buf), whole=True)            
@@ -594,7 +596,7 @@ class Operations(pyfuse3.Operations):
             if data == b'':
                 data = f.data
                 data = await dedup(buf, self.stat_msg_queue)
-                self.inodes[str(fh)].data = data
+                self.inodes[fh].data = data
 
             else:
                 buf = bytearray(buf)
@@ -621,11 +623,8 @@ class Operations(pyfuse3.Operations):
                     start_block = start_block + 1
         
         
-        self.inodes[str(fh)].size = f.size                
-        self.inodes[str(fh)].offsets = []
-
-        self.inodes.sync()
-        self.dirs.sync()
+        self.inodes[fh].size = f.size                
+        self.inodes[fh].offsets = []
 
         # dirs = self.dirs
         # inodes = self.inodes
