@@ -111,49 +111,14 @@ class Operations(pyfuse3.Operations):
         
         try:
             if len(fs_meta[0]) == 0:
-                self.inodes = fs_meta[0]               
-                self.dirs = fs_meta[1]
+                self.inodes = fs_meta[0]                
                 self.init_file_system()                
             else:
-                self.inodes = fs_meta[0]
-                self.dirs = fs_meta[1]
+                self.inodes = fs_meta[0]                
         except TypeError:
             print(traceback.format_exc())
-            self.inodes = inodes
-            self.dirs = dirs
+            self.inodes = inodes            
             self.init_file_system()
-
-
-    def add_to_dir(self, inode_p, inode):
-        pass
-        # try:
-        #     self.dirs[inode_p].append(inode)
-        #     dirs = self.dirs
-        #     inodes = self.inodes
-        #     return True
-        # except KeyError:            
-        #     self.dirs[inode_p] =  [inode]
-        #     dirs = self.dirs
-        #     inodes = self.inodes
-        #     return True
-        # except:
-        #     print(traceback.format_exc())
-        #     return False
-
-    def remove_from_dir(self, inode_p, inode):
-        pass
-        # try:
-        #     for y, x in enumerate(self.dirs[inode_p]):
-        #         if x == inode:
-        #             self.dirs[inode_p].pop(y)
-        #             dirs = self.dirs
-        #             inodes = self.inodes
-        #             break
-        #     return True
-        # except:
-        #     print(traceback.format_exc())
-        #     return False
-
 
     def init_file_system(self):
         '''Initialize file system '''
@@ -171,8 +136,7 @@ class Operations(pyfuse3.Operations):
         new_file.inode = pyfuse3.ROOT_INODE
 
         self.inodes[pyfuse3.ROOT_INODE] = new_file
-
-        self.add_to_dir(pyfuse3.ROOT_INODE, pyfuse3.ROOT_INODE)
+        
 
 
     async def lookup(self, inode_p, name, ctx=None):
@@ -183,15 +147,11 @@ class Operations(pyfuse3.Operations):
         elif name == '..':
             inode = self.inodes[inode_p]
         else:
-            try: 
-                for x in self.dirs[inode_p]:
-                    if self.inodes[x].name == name:
-                        inode =  x #self.inodes[inode].inode
-                        break                
-
-                    # if x[1].parent_inode==inode_p and x[1].name==name:
-                    #     inode = x[1].inode
-                    #     break                                          
+            try:
+                for x in self.inodes:
+                    if x.parent_inode==inode_p and x.name==name:
+                        inode = x.inode
+                        break                                          
             except TypeError:                
                 raise(pyfuse3.FUSEError(errno.ENOENT))
             except AttributeError:
@@ -245,11 +205,11 @@ class Operations(pyfuse3.Operations):
     #@profile
     async def readdir(self, inode, off, token):
         dir_entries = [] #self.dirs[inode][off:]
-        [dir_entries.append(x[1]) for y,x in enumerate(self.inodes.items(), off) if x[1].parent_inode==inode]        
+        [dir_entries.append(self.inodes[x]) for y,x in enumerate(self.inodes, off) if self.inodes[x].parent_inode==inode]        
         #[dir_entries.append(x[1]) for y,x in enumerate(self.dirs[inode], off)]
         try:
-            # pyfuse3.readdir_reply(token, dir_entries[off].name, await self.getattr(dir_entries[off].inode), off+1)
-            pyfuse3.readdir_reply(token, self.inodes[dir_entries[0]].name, await self.getattr(self.inodes[dir_entries[0]].inode), off+1)
+            pyfuse3.readdir_reply(token, dir_entries[off].name, await self.getattr(dir_entries[off].inode), off+1)
+            # pyfuse3.readdir_reply(token, self.inodes[dir_entries[0]].name, await self.getattr(self.inodes[dir_entries[0]].inode), off+1)
         except IndexError:
             return False
 
@@ -270,37 +230,36 @@ class Operations(pyfuse3.Operations):
         self._remove(inode_p, name, entry, d=True)
 
     def _remove(self, inode_p, name, entry, d=False):
-        if d:
-            if len(self.dirs[inode_p]) > 0:
-                raise pyfuse3.FUSEError(errno.ENOTEMPTY)
-            # if self.inodes[inode_p].inode != inode_p and self.inodes[inode_p].parent_inode == inode_p and self.inodes[inode_p].name != name:
-            #     raise pyfuse3.FUSEError(errno.ENOTEMPTY)
+        # if d:
+        #     if len(self.dirs[inode_p]) > 0:
+        #         raise pyfuse3.FUSEError(errno.ENOTEMPTY)
+        if self.inodes[inode_p].inode != inode_p and self.inodes[inode_p].parent_inode == inode_p and self.inodes[inode_p].name != name:
+            raise pyfuse3.FUSEError(errno.ENOTEMPTY)
         
-        if not d:
-            for k, v in self.inodes.items(): #TODO: BISECT ?
-                if v.name == name and v.parent_inode == inode_p:
-                    try:
-                        f = self.inodes.pop(k)
-                        self.remove_from_dir(f.parent_inode, f.inode)
-                        for i in f.data:
-                            update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)                         
-                        break
-                    except KeyError:
-                        print(traceback.format_exc())
-                        print("Key already removed? Index Inconsistance at self.inodes")
-        else:
-            i_copy = copy.copy(self.inodes)
-            for k, v in i_copy.items(): #TODO: BISECT ?
-                if (v.name == name and v.parent_inode == inode_p) or v.parent_inode == entry.st_ino:
-                    try:
-                        f = self.inodes.pop(k)
-                        self.remove_from_dir(f.parent_inode, f.inode)
-                        for i in f.data:
-                            update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)
-                                                
-                    except KeyError:
-                        print(traceback.format_exc())
-                        print("Key already removed? Index Inconsistance at self.inodes")
+        # if not d:
+        for k, v in self.inodes.items(): #TODO: BISECT ?
+            if v.name == name and v.parent_inode == inode_p:
+                try:
+                    f = self.inodes.pop(k)
+                    self.remove_from_dir(f.parent_inode, f.inode)
+                    for i in f.data:
+                        update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)                         
+                    break
+                except KeyError:
+                    print(traceback.format_exc())
+                    print("Key already removed? Index Inconsistance at self.inodes")
+        # else:
+        #     i_copy = copy.copy(self.inodes)
+        #     for k, v in i_copy.items(): #TODO: BISECT ?
+        #         if (v.name == name and v.parent_inode == inode_p) or v.parent_inode == entry.st_ino:
+        #             try:
+        #                 f = self.inodes.pop(k)
+        #                 self.remove_from_dir(f.parent_inode, f.inode)
+        #                 for i in f.data:
+        #                     update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)                                                
+        #             except KeyError:
+        #                 print(traceback.format_exc())
+        #                 print("Key already removed? Index Inconsistance at self.inodes")
         
     async def symlink(self, inode_p, name, target, ctx):
         mode = (stat.S_IFLNK | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
@@ -340,7 +299,7 @@ class Operations(pyfuse3.Operations):
             
 
     def _replace(self, inode_p_old, name_old, inode_p_new, name_new, entry_old, entry_new):
-        if stat.S_ISDIR(entry_old.st_mode) and len(self.dirs[inode_p_old]) > 0:
+        if stat.S_ISDIR(entry_old.st_mode):
             raise pyfuse3.FUSEError(errno.ENOTEMPTY)
 
         # for c in self.inodes:            
@@ -348,18 +307,15 @@ class Operations(pyfuse3.Operations):
         #         raise pyfuse3.FUSEError(errno.ENOTEMPTY)
         
         old = self.inodes.pop(entry_old.st_ino)      
-        self.remove_from_dir(inode_p_old, entry_old.st_ino)  
-        
+                
         old.name = name_new
         old.parent_inode = inode_p_new
         old.inode = self.gen_inode_number() #max(self.inodes) + 1 #len(self.inodes)+1
         self.inodes[old.inode] = old
+        
 
-        self.add_to_dir(inode_p_new, old.inode)
-
-    def gen_inode_number(self):
-        inos = [int(i) for i in self.inodes]
-        return max(inos) + 1
+    def gen_inode_number(self):        
+        return max(self.inodes) + 1
 
     async def link(self, inode, new_inode_p, new_name, ctx):
         entry_p = await self.getattr(new_inode_p)
@@ -371,8 +327,7 @@ class Operations(pyfuse3.Operations):
         ni.name = new_name
         ni.parent_inode = new_inode_p
         ni.inode = inode
-        self.inodes[inode] = ni
-        self.add_to_dir(new_inode_p, inode)
+        self.inodes[inode] = ni        
 
         return await self.getattr(inode)
 
@@ -479,9 +434,7 @@ class Operations(pyfuse3.Operations):
         new_file.name = name
         new_file.parent_inode = inode_p
         self.inodes[new_file.inode] = new_file
-
-        self.add_to_dir(inode_p, inode)
-                        
+                               
         return await self.getattr(inode)
 
     
@@ -715,7 +668,7 @@ def get_usage(stat_msg_queue):
     return undeduped_uncompressed, undeduped_compressed, deduped_compressed, (undeduped_compressed-deduped_compressed), compression_rate
 
 
-async def garbage_collector(stat_msg_queue):    
+def garbage_collector(stat_msg_queue):    
     global free_blocks
     global hash_table
     global key_index
@@ -1244,10 +1197,10 @@ async def persist(stat_msg_queue):
             # if len(write_buffer) > 0:                
             #     # await trio.to_thread.run_sync(write_new_blocks, write_buffer, wq, resq, swq, stat_msg_queue)
             #     await write_new_blocks(write_buffer, wq, resq, swq, stat_msg_queue)
-            await garbage_collector(stat_msg_queue)
-            await persist_data([inodes, dirs], stat_msg_queue)
-            # await trio.to_thread.run_sync(garbage_collector, stat_msg_queue)
-            # await trio.to_thread.run_sync(persist_data, [inodes, dirs], stat_msg_queue)
+            # await garbage_collector(stat_msg_queue)
+            # await persist_data([inodes, dirs], stat_msg_queue)
+            await trio.to_thread.run_sync(garbage_collector, stat_msg_queue)
+            await trio.to_thread.run_sync(persist_data, [inodes, 0], stat_msg_queue)
             last_time = time.time()            
 
             for i, t in enumerate(smbw_threads):
@@ -1314,7 +1267,6 @@ async def usage(stat_msg_queue):
         await trio.sleep(60)
         # prof.dump_stats('readdir_profile.lprof')        
 
-
 '''
 
 MAIN PROGRAM
@@ -1333,7 +1285,7 @@ if __name__ == '__main__':
     stat_sender.start()
 
     options = parse_args()
-    # init_logging(options.debug)
+    init_logging(options.debug)
     operations = Operations(stat_msg_queue)
 
     try:
@@ -1344,8 +1296,8 @@ if __name__ == '__main__':
     fuse_options = set(pyfuse3.default_options)
     fuse_options.add('fsname=VeratyFS')        
     fuse_options.discard('default_permissions')    
-    # if options.debug_fuse:
-    #     fuse_options.add('debug')    
+    if options.debug_fuse:
+        fuse_options.add('debug')    
     pyfuse3.init(operations, options.mountpoint, fuse_options)
     
     try:
