@@ -584,8 +584,53 @@ class Operations(pyfuse3.Operations):
         return data
     
     async def fsync(self, fh, datasync):
-        print("Datasync: " + str(datasync))
+        '''Flush buffers for open file *fh*
+
+        If *datasync* is true, only the file contents should be
+        flushed (in contrast to the metadata about the file).
+
+        *fh* will by an integer filehandle returned by a prior `open` or
+        `create` call.
+        '''
+        # print("Datasync: " + str(fh))
+
+    async def flush(self, fh):
+        '''Handle close() syscall.
+
+        *fh* will by an integer filehandle returned by a prior `open` or
+        `create` call.
+
+        This method is called whenever a file descriptor is closed. It may be
+        called multiple times for the same open file (e.g. if the file handle
+        has been duplicated).
+        '''
+        # print("Flush:" + str(fh))
+
+    async def release(self, fh):
+        '''Release open file
+
+        This method will be called when the last file descriptor of *fh* has
+        been closed, i.e. when the file is no longer opened by any client
+        process.
+
+        *fh* will by an integer filehandle returned by a prior `open` or
+        `create` call. Once `release` has been called, no future requests for
+        *fh* will be received (until the value is re-used in the return value of
+        another `open` or `create` call).
+
+        This method may return an error by raising `FUSEError`, but the error
+        will be discarded because there is no corresponding client request.
+        '''
+        # print("Release:" + str(fh))
+
+        self.inode_open_count[fh] -= 1
+
+        if self.inode_open_count[fh] == 0:
+            del self.inode_open_count[fh]
+            # if (await self.getattr(fh)).st_nlink == 0:
+            #     self.inodes.pop(fh)
     
+
     async def write(self, fh, offset, buf):                
         buf = memoryview(buf)
         # f = None
@@ -658,14 +703,6 @@ class Operations(pyfuse3.Operations):
         #     print(stat)
 
         return len(buf)
-
-    async def release(self, fh):
-        self.inode_open_count[fh] -= 1
-
-        if self.inode_open_count[fh] == 0:
-            del self.inode_open_count[fh]
-            if (await self.getattr(fh)).st_nlink == 0:
-                self.inodes.pop(fh)
 
 
 '''
