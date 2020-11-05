@@ -77,14 +77,14 @@ resq = mp.Queue() # Fila com as respostas das mensagens escritas
 swq = mp.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno
 
 
-try:
-    import faulthandler
-except ImportError:
-    pass
-else:
-    faulthandler.enable()
+# try:
+#     import faulthandler
+# except ImportError:
+#     pass
+# else:
+#     faulthandler.enable()
 
-log = logging.getLogger()
+# log = logging.getLogger()
 
 class Operations(pyfuse3.Operations):
     '''An example filesystem that stores all data in memory
@@ -100,17 +100,21 @@ class Operations(pyfuse3.Operations):
     '''    
 
     global fs_meta
-    
-    enable_writeback_cache = True
+    global inodes
+
+    enable_writeback_cache = False
     
     def __init__(self, stat_msg_queue):
         super(Operations, self).__init__()
         
+        
         self.inode_open_count = defaultdict(int)
-        self.stat_msg_queue = stat_msg_queue        
+        self.stat_msg_queue = stat_msg_queue
+
+        self.buffers = {}        
         
         try:
-            if len(fs_meta[0]) == 0:
+            if len(fs_meta[0]) > 0:
                 self.inodes = fs_meta[0]                
                 self.init_file_system()                
             else:
@@ -138,7 +142,6 @@ class Operations(pyfuse3.Operations):
         self.inodes[pyfuse3.ROOT_INODE] = new_file
         
 
-
     async def lookup(self, inode_p, name, ctx=None):
         
         inode = None
@@ -149,8 +152,9 @@ class Operations(pyfuse3.Operations):
         else:
             try:
                 for x in self.inodes:
-                    if x.parent_inode==inode_p and x.name==name:
-                        inode = x.inode
+                    if self.inodes[x].parent_inode==inode_p and self.inodes[x].name==name:
+                        inode = self.inodes[x].inode
+                        self.inodes[x].lookup_count = self.inodes[x].lookup_count + 1
                         break                                          
             except TypeError:                
                 raise(pyfuse3.FUSEError(errno.ENOENT))
@@ -176,7 +180,7 @@ class Operations(pyfuse3.Operations):
             entry.attr_timeout = 300
             entry.st_mode = f.mode
 
-            entry.st_nlink = 1 #await self.count_entries(inode) # #TODO O sistema vai suportar HARD-LINKS? Caso negativo, apenas retornar 2, funciona
+            entry.st_nlink = f.st_nlink #await self.count_entries(inode) # #TODO O sistema vai suportar HARD-LINKS? Caso negativo, apenas retornar 2, funciona
 
             entry.st_uid = f.uid
             entry.st_gid = f.gid
@@ -205,7 +209,7 @@ class Operations(pyfuse3.Operations):
     #@profile
     async def readdir(self, inode, off, token):
         dir_entries = [] #self.dirs[inode][off:]
-        [dir_entries.append(self.inodes[x]) for y,x in enumerate(self.inodes, off) if self.inodes[x].parent_inode==inode]        
+        [dir_entries.append(self.inodes[x]) for y,x in enumerate(self.inodes, off) if self.inodes[x].parent_inode==inode and self.inodes[x].list_on_dir_lookup]        
         #[dir_entries.append(x[1]) for y,x in enumerate(self.dirs[inode], off)]
         try:
             pyfuse3.readdir_reply(token, dir_entries[off].name, await self.getattr(dir_entries[off].inode), off+1)
@@ -219,7 +223,32 @@ class Operations(pyfuse3.Operations):
         if stat.S_ISDIR(entry.st_mode):
             raise pyfuse3.FUSEError(errno.EISDIR)
 
-        self._remove(inode_p, name, entry)
+        # self.inodes[entry.st_ino].parent_inode = -1
+        self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count - 1
+        self.inodes[entry.st_ino].list_on_dir_lookup = False
+        
+        # self.inode_open_count[inode] += 1
+        # self._remove(inode_p, name, entry)
+
+    async def forget(self, inode_list):
+        '''Decrease lookup counts for inodes in *inode_list*
+        *inode_list* is a list of ``(inode, nlookup)`` '''
+
+        for n in inode_list:
+            try:
+                if self.inodes[n[0]].inode != pyfuse3.ROOT_INODE:      
+                    self.inodes[n[0]].lookup_count = self.inodes[n[0]].lookup_count - n[1]
+                    if self.inodes[n[0]].lookup_count <= 0:
+                        self._remove(self.inodes[n[0]].parent_inode, self.inodes[n[0]].name, await self.getattr(n[0]))
+                else:
+                    self.inodes[n[0]].lookup_count = 1
+            except:
+                print('Inode does not exist')
+                pass
+
+
+        print("Hey, let's forget it, right?")
+        print(inode_list)        
 
     async def rmdir(self, inode_p, name, ctx):
         entry = await self.lookup(inode_p, name)
@@ -227,7 +256,13 @@ class Operations(pyfuse3.Operations):
         if not stat.S_ISDIR(entry.st_mode):
             raise pyfuse3.FUSEError(errno.ENOTDIR)
 
-        self._remove(inode_p, name, entry, d=True)
+        for i in self.inodes: # TODO: Don't know about that...really needed? If so, is really this way?
+            if self.inodes[i].parent_inode == entry.st_ino and self.inodes[i].list_on_dir_lookup == True:
+                raise FUSEError(errno.ENOTEMPTY)
+
+        # self.inodes[entry.st_ino].parent_inode = -1
+        self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count - 1
+        # self._remove(inode_p, name, entry, d=True)
 
     def _remove(self, inode_p, name, entry, d=False):
         # if d:
@@ -237,24 +272,25 @@ class Operations(pyfuse3.Operations):
             raise pyfuse3.FUSEError(errno.ENOTEMPTY)
         
         # if not d:
+        #==============
         for k, v in self.inodes.items(): #TODO: BISECT ?
             if v.name == name and v.parent_inode == inode_p:
                 try:
-                    f = self.inodes.pop(k)
-                    self.remove_from_dir(f.parent_inode, f.inode)
+                    f = self.inodes.pop(k)                    
                     for i in f.data:
                         update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)                         
                     break
                 except KeyError:
                     print(traceback.format_exc())
                     print("Key already removed? Index Inconsistance at self.inodes")
+
+        #================
         # else:
         #     i_copy = copy.copy(self.inodes)
         #     for k, v in i_copy.items(): #TODO: BISECT ?
         #         if (v.name == name and v.parent_inode == inode_p) or v.parent_inode == entry.st_ino:
         #             try:
-        #                 f = self.inodes.pop(k)
-        #                 self.remove_from_dir(f.parent_inode, f.inode)
+        #                 f = self.inodes.pop(k)        
         #                 for i in f.data:
         #                     update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)                                                
         #             except KeyError:
@@ -273,7 +309,7 @@ class Operations(pyfuse3.Operations):
             raise FUSEError(errno.EINVAL)
 
         entry_old = await self.lookup(inode_p_old, name_old)
-
+        
         try:
             entry_new = await self.lookup(inode_p_new, name_new)
         except pyfuse3.FUSEError as exc:
@@ -283,51 +319,78 @@ class Operations(pyfuse3.Operations):
         else:
             target_exists = True
 
-        if target_exists:            
-            self._replace(inode_p_old, name_old, inode_p_new, name_new, entry_old, entry_new)
-            # self.add_to_dir(inode_p_old, entry_new.st_ino)
+        if target_exists:                     
+            self._replace(inode_p_old, name_old, inode_p_new, name_new, entry_old, entry_new)            
         else:
-            old = self.inodes[inode_p_old]
-            # self.remove_from_dir(inode_p_old,old.inode)
-
+            old = self.inodes[entry_old.st_ino]
+            # old = self.inodes[inode_p_old]
             old.name = name_new
             old.parent_inode = inode_p_new
-            self.inodes[inode_p_old] = old
-            
-            self.add_to_dir(inode_p_new, old.inode)
+            self.inodes[entry_old.st_ino] = old
             
             
 
     def _replace(self, inode_p_old, name_old, inode_p_new, name_new, entry_old, entry_new):
-        if stat.S_ISDIR(entry_old.st_mode):
-            raise pyfuse3.FUSEError(errno.ENOTEMPTY)
+        # if stat.S_ISDIR(entry_old.st_mode):
+        #     raise pyfuse3.FUSEError(errno.ENOTEMPTY)
 
         # for c in self.inodes:            
         #     if self.inodes[c].inode != inode_p_old and self.inodes[c].parent_inode == inode_p_old and self.inodes[c].name != name_old: # and str('.trashinfo.') not in str(name_new) and str('.trashinfo.') not in str(name_old):
         #         raise pyfuse3.FUSEError(errno.ENOTEMPTY)
         
-        old = self.inodes.pop(entry_old.st_ino)      
-                
-        old.name = name_new
-        old.parent_inode = inode_p_new
-        old.inode = self.gen_inode_number() #max(self.inodes) + 1 #len(self.inodes)+1
-        self.inodes[old.inode] = old
+        '''Let the inode associated with *name_old* in *parent_inode_old* be
+        *inode_moved*, and the inode associated with *name_new* in
+        *parent_inode_new* (if it exists) be called *inode_deref*.
+
+        If *inode_deref* exists and has a non-zero lookup count, or if there are
+        other directory entries referring to *inode_deref*), the file system
+        must update only the directory entry for *name_new* to point to
+        *inode_moved* instead of *inode_deref*.'''
+
+
+        # old = self.inodes.pop(entry_old.st_ino)
+        inode_moved = self.inodes[entry_old.st_ino]
+        try:
+            inode_deref = self.inodes[entry_new.st_ino]
+            if inode_deref.lookup_count > 0:
+                inode_moved.name = name_new
+                inode_moved.parent_inode = inode_p_new                
+                self.inodes[entry_old.st_ino] = inode_moved #<- Point the new back to the old?
+                inode_deref.list_on_dir_lookup = False                
+                # self.inodes[entry_new.st_ino].list_on_dir_lookup = False                
+                # self.inodes[entry_new.st_ino].parent_inode = -1
+                self.inodes[entry_new.st_ino] = inode_deref
+                print('pointed')
+                return True            
+        except:
+            pass
+        
+        inode_moved.name = name_new
+        inode_moved.parent_inode = inode_p_new
+        # inode_moved.list_on_dir_lookup = True
+        # old.inode = self.gen_inode_number() #max(self.inodes) + 1 #len(self.inodes)+1
+        self.inodes[inode_moved.inode] = inode_moved
+        print('changed')
+
+        return True
         
 
     def gen_inode_number(self):        
         return max(self.inodes) + 1
+
 
     async def link(self, inode, new_inode_p, new_name, ctx):
         entry_p = await self.getattr(new_inode_p)
         if entry_p.st_nlink == 0:
             log.warning('Attempted to create entry '+ str(new_name) + 'with unlinked parent '+ str(new_inode_p))
             raise FUSEError(errno.EINVAL)
-               
-        ni = File_Inode(inode)
+                
+        ni = File_Inode(self.gen_inode_number())
         ni.name = new_name
         ni.parent_inode = new_inode_p
-        ni.inode = inode
-        self.inodes[inode] = ni        
+        ni.target = inode
+        self.inodes[ni.inode] = ni
+        self.inodes[inodes].lookup_count = self.inodes[inodes].lookup_count + 1
 
         return await self.getattr(inode)
 
@@ -336,9 +399,8 @@ class Operations(pyfuse3.Operations):
         old_inode = self.inodes[inode]
 
         if fields.update_size:
-            size = 0
-            f = self.inodes[inode]
-            for d in f.data:
+            size = 0            
+            for d in old_inode.data:
                 size = size + d.size
             if size > 0:
                 old_inode.size = size
@@ -420,9 +482,9 @@ class Operations(pyfuse3.Operations):
             log.warning('Attempted to create entry '+ str(name) + 'with unlinked parent '+ str(inode_p))
             raise FUSEError(errno.EINVAL)
 
-        inode = self.gen_inode_number() # max(self.inodes) + 1 # len(self.inodes)+1
+        #inode =  # max(self.inodes) + 1 # len(self.inodes)+1
         now_ns = time.time_ns()        
-        new_file = File_Inode(inode)
+        new_file = File_Inode(self.gen_inode_number())
         new_file.mode = mode
         new_file.uid = ctx.uid
         new_file.gid = ctx.gid
@@ -435,7 +497,7 @@ class Operations(pyfuse3.Operations):
         new_file.parent_inode = inode_p
         self.inodes[new_file.inode] = new_file
                                
-        return await self.getattr(inode)
+        return await self.getattr(new_file.inode)
 
     
     async def read(self, fh, offset, length, whole=False): 
@@ -457,18 +519,19 @@ class Operations(pyfuse3.Operations):
             end_blk = 0
             end_diff = 0                        
             
-            if len(self.inodes[fh].offsets) == 0:
+            if len(self.inodes[fh].offsets) == 0 or whole:
                 blks = [0]                
                 [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
                 blks.pop(0)
                 self.inodes[fh].offsets  = blks
             
             blk, blk_number = take_closest(self.inodes[fh].offsets, offset)            
-            if blk == offset:
-                start_blk = blk_number + 1
-            else:
-                start_blk = blk_number
-                start_diff = blk - offset
+            if offset != 0:
+                if blk == offset:
+                    start_blk = blk_number + 1
+                else:
+                    start_blk = blk_number
+                    start_diff = blk - offset
             
             blk_e, blk_number_e = take_closest(self.inodes[fh].offsets, end_offset)                        
             if blk_e == end_offset:
@@ -481,8 +544,8 @@ class Operations(pyfuse3.Operations):
                 if not whole:                    
                     data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
                 else:
-                    if start_diff < 0:
-                        start_blk = max(0, start_blk -1)
+                    # if start_diff < 0:
+                    #     start_blk = max(0, start_blk -1)
                     data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
                     
                     return start_diff, start_blk, end_blk, data
@@ -520,6 +583,8 @@ class Operations(pyfuse3.Operations):
 
         return data
     
+    async def fsync(self, fh, datasync):
+        print("Datasync: " + str(datasync))
     
     async def write(self, fh, offset, buf):                
         buf = memoryview(buf)
@@ -635,16 +700,16 @@ def get_usage(stat_msg_queue):
     deduped_compressed = 0
     compression_rate = 0.0
 
-    # key_index_copy = copy.copy(key_index)
-    for k in key_index:
+    key_index_copy = copy.copy(key_index)
+    for k in key_index_copy:
         try:
             if not hash_table[k].DELETED:
-                undeduped_uncompressed = undeduped_uncompressed + (key_index[k] * hash_table[k].deflated_size)
-                undeduped_compressed = undeduped_compressed + (max(0, key_index[k]) * hash_table[k].size)
+                undeduped_uncompressed = undeduped_uncompressed + (key_index_copy[k] * hash_table[k].deflated_size)
+                undeduped_compressed = undeduped_compressed + (max(0, key_index_copy[k]) * hash_table[k].size)
                 deduped_compressed = deduped_compressed + hash_table[k].size
         except KeyError:
             continue
-    # del key_index_copy
+    del key_index_copy
     
     fragmenation_size = fragmentation['free_size']
     fragmenation_quant = fragmentation['free_count']
@@ -685,20 +750,23 @@ def garbage_collector(stat_msg_queue):
         while len(GC.remove_uses) > 0:
             remove = GC.remove_uses.popleft()
             hash_table[remove].uses = hash_table[remove].uses - 1
-            if hash_table[remove].uses <= 0:
+            if hash_table[remove].uses <= block_negative_limit:
                 hash_table[remove].DELETED = True
-                if hash_table[remove].size <= small_block_limit:
-                    r = delete_small_block(remove, stat_msg_queue)
-                    if not r:
-                        print("DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete.")                
-                else:
-                    try:
-                        free_blocks[hash_table[remove].chunk].get(hash_table[remove].size).append(hash_table[remove].offset)                    
-                    except AttributeError:
-                        free_blocks[hash_table[remove].chunk].insert(hash_table[remove].size, [hash_table[remove].offset])
-                    finally:
-                        fragmentation['free_size'] = fragmentation['free_size'] + hash_table[remove].size
-                        fragmentation['free_count'] = fragmentation['free_count'] + 1            
+                if hash_table[remove].DELETION_TIME is not None and time.time() - hash_table[remove].DELETION_TIME > deletion_grace_period:
+                    if hash_table[remove].size <= small_block_limit:
+                        r = delete_small_block(remove, stat_msg_queue)
+                        if not r:
+                            print("DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete.")                
+                    else:
+                        try:
+                            free_blocks[hash_table[remove].chunk].get(hash_table[remove].size).append(hash_table[remove].offset)                    
+                        except AttributeError:
+                            free_blocks[hash_table[remove].chunk].insert(hash_table[remove].size, [hash_table[remove].offset])
+                        finally:
+                            fragmentation['free_size'] = fragmentation['free_size'] + hash_table[remove].size
+                            fragmentation['free_count'] = fragmentation['free_count'] + 1            
+                elif hash_table[remove].DELETION_TIME is None:
+                    hash_table[remove].DELETION_TIME = time.time()                    
             else:
                 if random.randrange(1,q_random) == 1:
                     stat_msg_queue.put({'INFO:GCProgress' : str((len(GC.add_uses) + len(GC.remove_uses)))})
@@ -977,7 +1045,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                 small_block_read_cache[b.hash] = d
             except Exception:
                 print(traceback.format_exc())
-                pass
+                raise IOError
     
         if d is None:
             try:
@@ -1285,7 +1353,7 @@ if __name__ == '__main__':
     stat_sender.start()
 
     options = parse_args()
-    init_logging(options.debug)
+    # init_logging(options.debug)
     operations = Operations(stat_msg_queue)
 
     try:
@@ -1296,8 +1364,8 @@ if __name__ == '__main__':
     fuse_options = set(pyfuse3.default_options)
     fuse_options.add('fsname=VeratyFS')        
     fuse_options.discard('default_permissions')    
-    if options.debug_fuse:
-        fuse_options.add('debug')    
+    # if options.debug_fuse:
+    #     fuse_options.add('debug')    
     pyfuse3.init(operations, options.mountpoint, fuse_options)
     
     try:

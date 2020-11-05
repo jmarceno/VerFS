@@ -63,6 +63,9 @@ class File_Inode:
         self.parent_inode = 0
         self.name = ""
         self.target = ""
+        self.st_nlink = 1
+        self.list_on_dir_lookup = True
+        self.lookup_count = 1
         self.uid = 0
         self.gid = 0
         self.mode = 0
@@ -86,7 +89,7 @@ class Block:
         self.uses = 1
         self.compressed = False
         self.DELETED = False
-        self.DELETION_TIME = str(time.time())
+        self.DELETION_TIME = None
 
 
 class FileBlock:
@@ -142,7 +145,7 @@ def read_small_block(_hash, stat_msg_queue):
             return smbs[_hash]
         except:
             print(traceback.format_exc())
-            return False
+            return b''
     
 
 def delete_small_block(_hash, stat_msg_queue):
