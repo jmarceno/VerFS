@@ -3,14 +3,23 @@
     // Hover to view descriptions of existing attributes.
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
-    "configurations": [                
+    "configurations": [
+        {
+            "name": "TEST - VeratyFS Operations",
+            "type": "python",
+            "request": "launch",
+            "module": "tests.test_operations",
+            "args": [
+                "/home/jardel/fsteste"
+            ]
+        },
         {
             "name": "VeratyFS Debug",
             "type": "python",
             "request": "launch",
             "program": "VeratyFS.py",
             "console": "integratedTerminal",
-            "args": [                
+            "args": [
                 "/home/jardel/fsteste"
             ]
         }

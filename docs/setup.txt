@@ -1,0 +1,6 @@
+
+ALLOW OTHER
+
+user_allow_other has to be present at /etc/fuse.conf
+
+The above option is needed to allow other users to have access to mounts

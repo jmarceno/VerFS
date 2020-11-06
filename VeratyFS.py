@@ -107,7 +107,7 @@ class Operations(pyfuse3.Operations):
     def __init__(self, stat_msg_queue):
         super(Operations, self).__init__()
         
-        
+        self.lock = trio.Lock()
         self.inode_open_count = defaultdict(int)
         self.stat_msg_queue = stat_msg_queue
 
@@ -152,7 +152,7 @@ class Operations(pyfuse3.Operations):
         else:
             try:
                 for x in self.inodes:
-                    if self.inodes[x].parent_inode==inode_p and self.inodes[x].name==name:
+                    if self.inodes[x].parent_inode==inode_p and self.inodes[x].name==name and self.inodes[x].list_on_dir_lookup:
                         inode = self.inodes[x].inode
                         self.inodes[x].lookup_count = self.inodes[x].lookup_count + 1
                         break                                          
@@ -217,38 +217,52 @@ class Operations(pyfuse3.Operations):
         except IndexError:
             return False
 
-    async def unlink(self, inode_p, name,ctx):
-        entry = await self.lookup(inode_p, name)
 
+    async def unlink(self, inode_p, name,ctx):
+        # await self.lock.acquire()
+        entry = await self.lookup(inode_p, name)
+        
         if stat.S_ISDIR(entry.st_mode):
             raise pyfuse3.FUSEError(errno.EISDIR)
+        
+        pyfuse3.invalidate_entry_async(inode_p, name, deleted=0, ignore_enoent=True)
 
-        # self.inodes[entry.st_ino].parent_inode = -1
-        self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count - 1
+        self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count - 1        
+        self.inodes[entry.st_ino].st_nlink = self.inodes[entry.st_ino].st_nlink - 1
         self.inodes[entry.st_ino].list_on_dir_lookup = False
         
-        # self.inode_open_count[inode] += 1
-        # self._remove(inode_p, name, entry)
+        # def invalidate_entry(fuse_ino_t inode_p, bytes name, fuse_ino_t deleted=0):
+        # def invalidate_entry_async(inode_p, name, deleted=0, ignore_enoent=False):
+        
+        
+        # if self.inodes[entry.st_ino].lookup_count <= 0 and self.inodes[entry.st_ino].st_nlink <= 0:
+        #     self._remove(self.inodes[entry.st_ino].parent_inode, self.inodes[entry.st_ino].name, await self.getattr(entry.st_ino))
+                
+        # self.lock.release()
 
     async def forget(self, inode_list):
         '''Decrease lookup counts for inodes in *inode_list*
         *inode_list* is a list of ``(inode, nlookup)`` '''
-
+        await self.lock.acquire()
+        
         for n in inode_list:
             try:
                 if self.inodes[n[0]].inode != pyfuse3.ROOT_INODE:      
                     self.inodes[n[0]].lookup_count = self.inodes[n[0]].lookup_count - n[1]
                     if self.inodes[n[0]].lookup_count <= 0:
+                        
+                        pyfuse3.invalidate_entry_async(self.inodes[n[0]].parent_inode, self.inodes[n[0]].name, deleted=0, ignore_enoent=True)
+
                         self._remove(self.inodes[n[0]].parent_inode, self.inodes[n[0]].name, await self.getattr(n[0]))
                 else:
                     self.inodes[n[0]].lookup_count = 1
             except:
-                print('Inode does not exist')
+                # print('Inode does not exist')
                 pass
+        
+        print(inode_list)
 
-
-        print("Hey, let's forget it, right?")
-        print(inode_list)        
+        self.lock.release()
 
     async def rmdir(self, inode_p, name, ctx):
         entry = await self.lookup(inode_p, name)
@@ -258,11 +272,16 @@ class Operations(pyfuse3.Operations):
 
         for i in self.inodes: # TODO: Don't know about that...really needed? If so, is really this way?
             if self.inodes[i].parent_inode == entry.st_ino and self.inodes[i].list_on_dir_lookup == True:
-                raise FUSEError(errno.ENOTEMPTY)
-
-        # self.inodes[entry.st_ino].parent_inode = -1
+                raise FUSEError(errno.ENOTEMPTY)       
+        
         self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count - 1
-        # self._remove(inode_p, name, entry, d=True)
+
+        if self.inodes[entry.st_ino].lookup_count == 0:
+            pyfuse3.invalidate_entry_async(self.inodes[entry.st_ino].parent_inode, self.inodes[entry.st_ino].name, deleted=0, ignore_enoent=True)
+        
+        # self.inodes[entry.st_ino].st_nlink == 0:
+
+        
 
     def _remove(self, inode_p, name, entry, d=False):
         # if d:
@@ -296,15 +315,22 @@ class Operations(pyfuse3.Operations):
         #             except KeyError:
         #                 print(traceback.format_exc())
         #                 print("Key already removed? Index Inconsistance at self.inodes")
-        
+
+
     async def symlink(self, inode_p, name, target, ctx):
         mode = (stat.S_IFLNK | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
                 stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
                 stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH)
-        return await self._create(inode_p, name, mode, ctx, target=target)
+        print("target -> " + str(target))
+        entry = await self._create(inode_p, name, mode, ctx, target=target) 
+        self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count + 1
+        
+        return entry
 
 
     async def rename(self, inode_p_old, name_old, inode_p_new, name_new, flags, ctx):
+        await self.lock.acquire()
+        
         if flags != 0:
             raise FUSEError(errno.EINVAL)
 
@@ -327,7 +353,8 @@ class Operations(pyfuse3.Operations):
             old.name = name_new
             old.parent_inode = inode_p_new
             self.inodes[entry_old.st_ino] = old
-            
+        
+        self.lock.release()
             
 
     def _replace(self, inode_p_old, name_old, inode_p_new, name_new, entry_old, entry_new):
@@ -346,8 +373,7 @@ class Operations(pyfuse3.Operations):
         other directory entries referring to *inode_deref*), the file system
         must update only the directory entry for *name_new* to point to
         *inode_moved* instead of *inode_deref*.'''
-
-
+        
         # old = self.inodes.pop(entry_old.st_ino)
         inode_moved = self.inodes[entry_old.st_ino]
         try:
@@ -371,7 +397,7 @@ class Operations(pyfuse3.Operations):
         # old.inode = self.gen_inode_number() #max(self.inodes) + 1 #len(self.inodes)+1
         self.inodes[inode_moved.inode] = inode_moved
         print('changed')
-
+        
         return True
         
 
@@ -388,9 +414,10 @@ class Operations(pyfuse3.Operations):
         ni = File_Inode(self.gen_inode_number())
         ni.name = new_name
         ni.parent_inode = new_inode_p
-        ni.target = inode
-        self.inodes[ni.inode] = ni
-        self.inodes[inodes].lookup_count = self.inodes[inodes].lookup_count + 1
+        ni.lookup_count = 1        
+        self.inodes[ni.inode] = ni        
+        
+        self.inodes[inode].st_nlink = self.inodes[inode].st_nlink + 1
 
         return await self.getattr(inode)
 
@@ -491,10 +518,14 @@ class Operations(pyfuse3.Operations):
         new_file.mtime_ns = now_ns
         new_file.atime_ns = now_ns
         new_file.ctime_ns = now_ns
-        new_file.target = target
         new_file.rdev = rdev
         new_file.name = name
         new_file.parent_inode = inode_p
+        if target is not None:
+            new_file.target = target
+            st = os.stat(target)
+            # self.inodes[st.st_ino].st_nlink = self.inodes[st.st_ino].st_nlink + 1
+        
         self.inodes[new_file.inode] = new_file
                                
         return await self.getattr(new_file.inode)
@@ -832,9 +863,13 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
     global free_blocks
 
     in_index = False
+    in_table = False
     
     if idx in key_index:
         in_index = True
+    
+    if idx in hash_table:
+        in_table = True
 
     if add:
         if in_index:
@@ -845,19 +880,20 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
     else:
         try:
             if in_index and key_index[idx] - key_index[idx] <= 0:
-                if free_blocks[hash_table[idx].chunk].get(hash_table[idx].size) is not None:
-                    free_blocks[hash_table[idx].chunk].get(hash_table[idx].size).append(hash_table[idx].offset)                    
-                else:
-                    free_blocks[hash_table[idx].chunk].insert(hash_table[idx].size, [hash_table[idx].offset])                    
-                    
-                GC.remove_uses.append(idx)
-                hash_table[idx].DELETED = True
-                hash_table[idx].DELETION_TIME = time.time()
-                try:
-                    del key_index[idx]
-                    del read_cache[idx]
-                except KeyError:
-                    pass                
+                if in_table:
+                    if free_blocks[hash_table[idx].chunk].get(hash_table[idx].size) is not None:
+                        free_blocks[hash_table[idx].chunk].get(hash_table[idx].size).append(hash_table[idx].offset)                    
+                    else:
+                        free_blocks[hash_table[idx].chunk].insert(hash_table[idx].size, [hash_table[idx].offset])                    
+                        
+                    GC.remove_uses.append(idx)
+                    hash_table[idx].DELETED = True
+                    hash_table[idx].DELETION_TIME = time.time()
+                    try:
+                        del key_index[idx]
+                        del read_cache[idx]
+                    except KeyError:
+                        pass                
             elif in_index:
                 key_index[idx] = key_index[idx] - 1
                 hash_table[idx].uses = hash_table[idx].uses - -1
@@ -1168,60 +1204,6 @@ def chunks(lst, n):
 async def variable_chunks(data):
     return await hashed_chunks(data)
 
-'''
-
-CODE INITIALIZATION AND RUN
-
-'''
-
-def init_logging(debug=False):
-    formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(threadName)s: '
-                                  '[%(name)s] %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    root_logger = logging.getLogger()
-    if debug:
-        handler.setLevel(logging.DEBUG)
-        root_logger.setLevel(logging.DEBUG)
-    else:
-        handler.setLevel(logging.INFO)
-        root_logger.setLevel(logging.INFO)
-    root_logger.addHandler(handler)
-
-def parse_args():
-    '''Parse command line'''
-
-    parser = ArgumentParser()
-
-    parser.add_argument('mountpoint', type=str,
-                        help='Where to mount the file system')
-    parser.add_argument('--debug', action='store_true', default=False,
-                        help='Enable debugging output')
-    parser.add_argument('--debug-fuse', action='store_true', default=False,
-                        help='Enable FUSE debugging output')
-
-    return parser.parse_args()
-
-
-async def parent(stat_msg_queue):    
-
-    print("Starting main process coodenator...")
-    async with trio.open_nursery() as nursery:
-        try:
-            print("Starting: PyFuse Main...")
-            nursery.start_soon(pyfuse3.main)
-
-            print("Starting: Persist...")        
-            nursery.start_soon(persist, stat_msg_queue)
-
-            print("Start: Usage...")
-            nursery.start_soon(usage, stat_msg_queue)
-            
-        except KeyboardInterrupt:
-            sys.exit(-1)
-        except:
-            print(traceback.format_exc())
-
 
 def write_small_block_to_disk(swq, stat_msg_queue):
     while True:
@@ -1372,6 +1354,63 @@ async def usage(stat_msg_queue):
         await trio.sleep(60)
         # prof.dump_stats('readdir_profile.lprof')        
 
+
+'''
+
+CODE INITIALIZATION AND RUN
+
+'''
+
+
+def init_logging(debug=False):
+    formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(threadName)s: '
+                                  '[%(name)s] %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    root_logger = logging.getLogger()
+    if debug:
+        handler.setLevel(logging.DEBUG)
+        root_logger.setLevel(logging.DEBUG)
+    else:
+        handler.setLevel(logging.INFO)
+        root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
+
+
+def parse_args():
+    '''Parse command line'''
+
+    parser = ArgumentParser()
+
+    parser.add_argument('mountpoint', type=str,
+                        help='Where to mount the file system')
+    parser.add_argument('--debug', action='store_true', default=False,
+                        help='Enable debugging output')
+    parser.add_argument('--debug-fuse', action='store_true', default=False,
+                        help='Enable FUSE debugging output')
+
+    return parser.parse_args()
+
+
+async def parent(stat_msg_queue):    
+    
+    print("Starting main process coodenator...")
+    async with trio.open_nursery() as nursery:
+        try:
+            print("Starting: PyFuse Main...")
+            nursery.start_soon(pyfuse3.main)
+
+            print("Starting: Persist...")        
+            nursery.start_soon(persist, stat_msg_queue)
+
+            print("Start: Usage...")
+            nursery.start_soon(usage, stat_msg_queue)
+            
+        except KeyboardInterrupt:
+            sys.exit(-1)
+        except:
+            print(traceback.format_exc())
+
 '''
 
 MAIN PROGRAM
@@ -1399,10 +1438,11 @@ if __name__ == '__main__':
         pass
 
     fuse_options = set(pyfuse3.default_options)
-    fuse_options.add('fsname=VeratyFS')        
+    fuse_options.add('fsname=VeratyFS')
+    fuse_options.add('allow_other')    
     fuse_options.discard('default_permissions')    
     # if options.debug_fuse:
-    #     fuse_options.add('debug')    
+    #     fuse_options.add('debug')  
     pyfuse3.init(operations, options.mountpoint, fuse_options)
     
     try:
@@ -1417,4 +1457,4 @@ if __name__ == '__main__':
         stat_sender.join(2)
         stat_sender.kill()
     finally:
-        pyfuse3.close()
+        pyfuse3.close(unmount=True)
