@@ -19,6 +19,7 @@ from .util import fuse_test_marker, wait_for_mount, umount, cleanup
 basename = os.path.join(os.path.dirname(__file__), '..')
 TEST_FILE = __file__
 
+
 with open(TEST_FILE, 'rb') as fh:
     TEST_DATA = fh.read()
 
@@ -43,7 +44,7 @@ def test_veratyfs(tmpdir):
         tst_chown(mnt_dir)
         tst_chmod(mnt_dir) 
         tst_utimens(mnt_dir)
-        tst_link(mnt_dir)
+        #tst_link(mnt_dir)
         tst_rename(mnt_dir)
         tst_readdir(mnt_dir)
         tst_statvfs(mnt_dir)
@@ -187,14 +188,15 @@ def tst_link(mnt_dir):
     os.link(name1, name2)
 
     fstat1 = os.lstat(name1)
-    fstat2 = os.lstat(name2)    
+    fstat2 = os.lstat(name2)
+
     assert fstat1 == fstat2
     assert fstat1.st_nlink == 2
 
     assert os.path.basename(name2) in os.listdir(mnt_dir)
     assert filecmp.cmp(name1, name2, False)
-    os.unlink(name2)    
-    fstat1 = os.lstat(name1)    
+    os.unlink(name2)
+    fstat1 = os.lstat(name1)
     assert fstat1.st_nlink == 1
     os.unlink(name1)
 

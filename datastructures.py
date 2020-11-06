@@ -10,7 +10,6 @@ import os
 import _pickle as cPickle
 import json
 import base64
-import collections
 
 from sqlitedict import SqliteDict
 from os import path
@@ -57,100 +56,16 @@ class QueuedWrite:
 
         return d
 
-# __getattr__
-# def __getattribute__(self, name):
-#     print('Attribute error. Is this a Hard Link? =', name)
-#     if name == 'foo':
-#         return 0
-#     else:
-#         return super().__getattribute__(name)
 
-
-class FileSystem(collections.MutableMapping):
-    def __init__(self):
-        self.nodes = {}
-        self.pointers = {}
-
-    def get_dir(self, parent_inode, offset=0):
-        d = []
-        for x, p in enumerate(self.pointers, offset):
-            if self.pointers[p].parent_inode == parent_inode:
-                d.append(self.get_node(p))
-        return d
-
-    def get_node(self, inode):
-        if not self.pointers[inode].hard_link:
-            return Full_Node(self.inodes[inode], self.pointers[inode])
-        else:
-            return Full_Node(self.inodes[self.pointers[inode].inode], self.pointers[inode])
-            
-
-    def add_node(self, name, parent_inode, inode=0, hard_link=False, sym_target=""):
-        if not hard_link:
-            inode = self.gen_inode_number()
-            self.nodes[inode] = File_Inode(inode=inode)
-            self.pointers[inode] = Pointers(inode, name, parent_inode, sym_target)
-        else:
-            new_inode = self.gen_inode_number()
-            self.nodes[inode].st_nlink += 1
-            self.pointers[new_inode] = Pointers(inode, name, parent_inode, True, sym_target)
-
-
-    def remove_node(self, inode):
-        if not self.pointers[inode].hard_link:
-            del self.pointers[inode]
-            del self.nodes[inode]
-        else:
-            self.nodes[self.pointers[inode].inode].st_nlink -= 1
-            del self.pointers[inode]
-
-
-    def gen_inode_number(self):
-        return max(self.nodes) + 1
-
-
-class Full_Node(object):
-    def __init__(self, pointer, inode):
-        self.inode = pointer.inode
-        self.name = pointer.name
-        self.sym_target = pointer.sym_target
-        self.parent_inode = pointer.parent_inode
-        self.hard_link = pointer.hard_link
-        self.list_on_dir_lookup = pointer.list_on_dir_lookup     
-        self.st_nlink = inode.st_nlink
-        self.lookup_count = inode.lookup_count
-        self.uid = inode.uid
-        self.gid = inode.gid
-        self.mode = inode.mode
-        self.mtime_ns = inode.mtime_ns
-        self.atime_ns = inode.atime_ns
-        self.ctime_ns = inode.ctime_ns        
-        self.size = inode.size
-        self.rdev = inode.rdev
-        self.data = inode.data
-        self.offsets = inode.offsets
-
-
-class Pointers(object):
-    def __init__(self, inode, name, parent_inode, hard_link=False, sym_target=""):
-        self.inode = inode # The actual inode, or the inode that it points to
-        self.name = name
-        self.sym_target = ""
-        self.parent_inode = parent_inode
-        self.hard_link = hard_link
-        self.list_on_dir_lookup = True
-
-
-class File_Inode(object):
-    def __init__(self, inode=-1):
-        # self.inode = inode
-        #self.parent_inode = 0
-        # self.name = ""        
-        # self.target = ""
-        #self.target_inode = -1
+class File_Inode:
+    def __init__(self, _id):
+        self.inode = _id        
+        self.parent_inode = 0
+        self.name = ""
+        self.target = ""
         self.st_nlink = 1
-        # self.list_on_dir_lookup = True
-        self.lookup_count = 1        
+        self.list_on_dir_lookup = True
+        self.lookup_count = 1
         self.uid = 0
         self.gid = 0
         self.mode = 0
@@ -161,7 +76,8 @@ class File_Inode(object):
         self.rdev = 0
         self.data = [] # Tuple with hash and size
         self.offsets = []
-        
+
+    
 
 class Block:
     def __init__(self):
