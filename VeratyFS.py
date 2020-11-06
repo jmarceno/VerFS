@@ -171,16 +171,16 @@ class Operations(pyfuse3.Operations):
     async def getattr(self, inode, ctx=None):        
 
         try:
-            f = self.inodes[inode]
+            f = self.inodes[inode]            
 
             entry = pyfuse3.EntryAttributes()
-            entry.st_ino = inode
+            entry.st_ino = f.inode
             entry.generation = 0
             entry.entry_timeout = 300
             entry.attr_timeout = 300
             entry.st_mode = f.mode
 
-            entry.st_nlink = f.st_nlink #await self.count_entries(inode) # #TODO O sistema vai suportar HARD-LINKS? Caso negativo, apenas retornar 2, funciona
+            entry.st_nlink = f.st_nlink #await self.count_entries(inode) # #TODO O sistema vai suportar HARD-LINKS? Caso negativo, apenas retornar 1, funciona
 
             entry.st_uid = f.uid
             entry.st_gid = f.gid
@@ -227,9 +227,18 @@ class Operations(pyfuse3.Operations):
         
         pyfuse3.invalidate_entry_async(inode_p, name, deleted=0, ignore_enoent=True)
 
-        self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count - 1        
-        self.inodes[entry.st_ino].st_nlink = self.inodes[entry.st_ino].st_nlink - 1
+        print("received name -> " + str(name))
+        print("unlink target -> " + str(self.inodes[entry.st_ino].target_inode))
+        print("unlink name -> " + str(self.inodes[entry.st_ino].name))
+        print("unlink inode -> " + str(self.inodes[entry.st_ino].inode))
+        await self.lock.acquire()
+        self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count - 1
         self.inodes[entry.st_ino].list_on_dir_lookup = False
+        
+        if self.inodes[entry.st_ino].target_inode != -1:
+            print("st_nlinks = " + str(self.inodes[self.inodes[entry.st_ino].target_inode].st_nlink))            
+            self.inodes[self.inodes[entry.st_ino].target_inode].st_nlink -= 1 #self.inodes[self.inodes[entry.st_ino].target_inode].st_nlink - 1
+            print("st_nlinks = " + str(self.inodes[self.inodes[entry.st_ino].target_inode].st_nlink))
         
         # def invalidate_entry(fuse_ino_t inode_p, bytes name, fuse_ino_t deleted=0):
         # def invalidate_entry_async(inode_p, name, deleted=0, ignore_enoent=False):
@@ -238,7 +247,7 @@ class Operations(pyfuse3.Operations):
         # if self.inodes[entry.st_ino].lookup_count <= 0 and self.inodes[entry.st_ino].st_nlink <= 0:
         #     self._remove(self.inodes[entry.st_ino].parent_inode, self.inodes[entry.st_ino].name, await self.getattr(entry.st_ino))
                 
-        # self.lock.release()
+        self.lock.release()
 
     async def forget(self, inode_list):
         '''Decrease lookup counts for inodes in *inode_list*
@@ -250,7 +259,7 @@ class Operations(pyfuse3.Operations):
                 if self.inodes[n[0]].inode != pyfuse3.ROOT_INODE:      
                     self.inodes[n[0]].lookup_count = self.inodes[n[0]].lookup_count - n[1]
                     if self.inodes[n[0]].lookup_count <= 0:
-                        
+                        self.inodes[n[0]].st_nlink = 0
                         pyfuse3.invalidate_entry_async(self.inodes[n[0]].parent_inode, self.inodes[n[0]].name, deleted=0, ignore_enoent=True)
 
                         self._remove(self.inodes[n[0]].parent_inode, self.inodes[n[0]].name, await self.getattr(n[0]))
@@ -401,25 +410,36 @@ class Operations(pyfuse3.Operations):
         return True
         
 
-    def gen_inode_number(self):        
-        return max(self.inodes) + 1
 
 
     async def link(self, inode, new_inode_p, new_name, ctx):
+        '''Create directory entry *name* in *parent_inode* refering to *inode*.
+
+        *ctx* will be a `RequestContext` instance.
+
+        The method must return an `EntryAttributes` instance with the
+        attributes of the newly created directory entry.
+
+        (Successful) execution of this handler increases the lookup count for
+        the returned inode by one.
+        '''
+
         entry_p = await self.getattr(new_inode_p)
         if entry_p.st_nlink == 0:
             log.warning('Attempted to create entry '+ str(new_name) + 'with unlinked parent '+ str(new_inode_p))
             raise FUSEError(errno.EINVAL)
                 
-        ni = File_Inode(self.gen_inode_number())
+        new_ino = self.gen_inode_number()
+        ni = File_Inode(new_ino)
         ni.name = new_name
         ni.parent_inode = new_inode_p
-        ni.lookup_count = 1        
-        self.inodes[ni.inode] = ni        
+        ni.lookup_count = ni.lookup_count + 1
+        ni.target_inode = inode        
+        self.inodes[new_ino] = ni        
         
-        self.inodes[inode].st_nlink = self.inodes[inode].st_nlink + 1
+        self.inodes[inode].st_nlink += 1 # self.inodes[inode].st_nlink + 1
 
-        return await self.getattr(inode)
+        return await self.getattr(new_ino)
 
     async def setattr(self, inode, attr, fields, fh, ctx):
 

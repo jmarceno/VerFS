@@ -5,7 +5,7 @@ from cache import LRU
 from compression import compressed_pickle, decompress_pickle, decompress_data, compress_data
 import os
 import time
-from datastructures import Garbage_Collector
+from datastructures import Garbage_Collector, InodeList
 
 """
 Bunch of stuff to test the concept. Change this shit later to something useful fast and safe
@@ -25,7 +25,7 @@ performance_measure_bars = False
 free_blocks = []
 GC = Garbage_Collector()
 
-inodes = {} #IOBTree.IOBTree()
+inodes = InodeList() #IOBTree.IOBTree()
 dirs = {}
 # contents = {} #OOBTree.OOBTree() #IOBTree.IOBTree()
 
