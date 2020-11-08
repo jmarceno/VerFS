@@ -1,0 +1,15 @@
+VeratyFS File System
+- Version 0.0.5
+- Variable Block Size
+- Inline Dedup at Block Level
+- Transparent InLine Compression (only for data that the system consider the compression potential to be worth the speed trade-off)
+- 
+- Planned:
+- Cloud Sync and Mount
+- Posix Compliant
+- Software RAID (z-RAID like)
+
+
+Posix Operations not supported at this time
+- link (hard links)
+- truncate (neither by path or by fd)

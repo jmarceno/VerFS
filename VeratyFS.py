@@ -210,16 +210,16 @@ class Operations(pyfuse3.Operations):
     async def readdir(self, inode, off, token):
         dir_entries = [] #self.dirs[inode][off:]
         [dir_entries.append(self.inodes[x]) for y,x in enumerate(self.inodes, off) if self.inodes[x].parent_inode==inode and self.inodes[x].list_on_dir_lookup]        
-        #[dir_entries.append(x[1]) for y,x in enumerate(self.dirs[inode], off)]
+        
         try:
             pyfuse3.readdir_reply(token, dir_entries[off].name, await self.getattr(dir_entries[off].inode), off+1)
-            # pyfuse3.readdir_reply(token, self.inodes[dir_entries[0]].name, await self.getattr(self.inodes[dir_entries[0]].inode), off+1)
+            
         except IndexError:
             return False
 
 
     async def unlink(self, inode_p, name,ctx):
-        # await self.lock.acquire()
+
         entry = await self.lookup(inode_p, name)
         
         if stat.S_ISDIR(entry.st_mode):
@@ -231,14 +231,6 @@ class Operations(pyfuse3.Operations):
         self.inodes[entry.st_ino].st_nlink = self.inodes[entry.st_ino].st_nlink - 1
         self.inodes[entry.st_ino].list_on_dir_lookup = False
         
-        # def invalidate_entry(fuse_ino_t inode_p, bytes name, fuse_ino_t deleted=0):
-        # def invalidate_entry_async(inode_p, name, deleted=0, ignore_enoent=False):
-        
-        
-        # if self.inodes[entry.st_ino].lookup_count <= 0 and self.inodes[entry.st_ino].st_nlink <= 0:
-        #     self._remove(self.inodes[entry.st_ino].parent_inode, self.inodes[entry.st_ino].name, await self.getattr(entry.st_ino))
-                
-        # self.lock.release()
 
     async def forget(self, inode_list):
         '''Decrease lookup counts for inodes in *inode_list*
@@ -256,8 +248,7 @@ class Operations(pyfuse3.Operations):
                         self._remove(self.inodes[n[0]].parent_inode, self.inodes[n[0]].name, await self.getattr(n[0]))
                 else:
                     self.inodes[n[0]].lookup_count = 1
-            except:
-                # print('Inode does not exist')
+            except:                
                 pass
         
         print(inode_list)
@@ -279,9 +270,7 @@ class Operations(pyfuse3.Operations):
         if self.inodes[entry.st_ino].lookup_count == 0:
             pyfuse3.invalidate_entry_async(self.inodes[entry.st_ino].parent_inode, self.inodes[entry.st_ino].name, deleted=0, ignore_enoent=True)
         
-        # self.inodes[entry.st_ino].st_nlink == 0:
-
-        
+                
 
     def _remove(self, inode_p, name, entry, d=False):
         # if d:
@@ -289,9 +278,7 @@ class Operations(pyfuse3.Operations):
         #         raise pyfuse3.FUSEError(errno.ENOTEMPTY)
         if self.inodes[inode_p].inode != inode_p and self.inodes[inode_p].parent_inode == inode_p and self.inodes[inode_p].name != name:
             raise pyfuse3.FUSEError(errno.ENOTEMPTY)
-        
-        # if not d:
-        #==============
+
         for k, v in self.inodes.items(): #TODO: BISECT ?
             if v.name == name and v.parent_inode == inode_p:
                 try:
@@ -303,25 +290,12 @@ class Operations(pyfuse3.Operations):
                     print(traceback.format_exc())
                     print("Key already removed? Index Inconsistance at self.inodes")
 
-        #================
-        # else:
-        #     i_copy = copy.copy(self.inodes)
-        #     for k, v in i_copy.items(): #TODO: BISECT ?
-        #         if (v.name == name and v.parent_inode == inode_p) or v.parent_inode == entry.st_ino:
-        #             try:
-        #                 f = self.inodes.pop(k)        
-        #                 for i in f.data:
-        #                     update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)                                                
-        #             except KeyError:
-        #                 print(traceback.format_exc())
-        #                 print("Key already removed? Index Inconsistance at self.inodes")
-
 
     async def symlink(self, inode_p, name, target, ctx):
         mode = (stat.S_IFLNK | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
                 stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
                 stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH)
-        print("target -> " + str(target))
+        
         entry = await self._create(inode_p, name, mode, ctx, target=target) 
         self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count + 1
         
@@ -348,8 +322,7 @@ class Operations(pyfuse3.Operations):
         if target_exists:                     
             self._replace(inode_p_old, name_old, inode_p_new, name_new, entry_old, entry_new)            
         else:
-            old = self.inodes[entry_old.st_ino]
-            # old = self.inodes[inode_p_old]
+            old = self.inodes[entry_old.st_ino]            
             old.name = name_new
             old.parent_inode = inode_p_new
             self.inodes[entry_old.st_ino] = old
@@ -374,7 +347,7 @@ class Operations(pyfuse3.Operations):
         must update only the directory entry for *name_new* to point to
         *inode_moved* instead of *inode_deref*.'''
         
-        # old = self.inodes.pop(entry_old.st_ino)
+        
         inode_moved = self.inodes[entry_old.st_ino]
         try:
             inode_deref = self.inodes[entry_new.st_ino]
@@ -383,20 +356,16 @@ class Operations(pyfuse3.Operations):
                 inode_moved.parent_inode = inode_p_new                
                 self.inodes[entry_old.st_ino] = inode_moved #<- Point the new back to the old?
                 inode_deref.list_on_dir_lookup = False                
-                # self.inodes[entry_new.st_ino].list_on_dir_lookup = False                
-                # self.inodes[entry_new.st_ino].parent_inode = -1
+        
                 self.inodes[entry_new.st_ino] = inode_deref
-                print('pointed')
+        
                 return True            
         except:
             pass
         
         inode_moved.name = name_new
-        inode_moved.parent_inode = inode_p_new
-        # inode_moved.list_on_dir_lookup = True
-        # old.inode = self.gen_inode_number() #max(self.inodes) + 1 #len(self.inodes)+1
-        self.inodes[inode_moved.inode] = inode_moved
-        print('changed')
+        inode_moved.parent_inode = inode_p_new        
+        self.inodes[inode_moved.inode] = inode_moved        
         
         return True
         
@@ -408,7 +377,7 @@ class Operations(pyfuse3.Operations):
     async def link(self, inode, new_inode_p, new_name, ctx):
         entry_p = await self.getattr(new_inode_p)
         if entry_p.st_nlink == 0:
-            log.warning('Attempted to create entry '+ str(new_name) + 'with unlinked parent '+ str(new_inode_p))
+            print('Attempted to create entry '+ str(new_name) + 'with unlinked parent '+ str(new_inode_p))
             raise FUSEError(errno.EINVAL)
                 
         ni = File_Inode(self.gen_inode_number())
@@ -420,6 +389,7 @@ class Operations(pyfuse3.Operations):
         self.inodes[inode].st_nlink = self.inodes[inode].st_nlink + 1
 
         return await self.getattr(inode)
+        
 
     async def setattr(self, inode, attr, fields, fh, ctx):
 
@@ -506,7 +476,7 @@ class Operations(pyfuse3.Operations):
 
     async def _create(self, inode_p, name, mode, ctx, rdev=0, target=None):
         if (await self.getattr(inode_p)).st_nlink == 0:
-            log.warning('Attempted to create entry '+ str(name) + 'with unlinked parent '+ str(inode_p))
+            print('Attempted to create entry '+ str(name) + 'with unlinked parent '+ str(inode_p))
             raise FUSEError(errno.EINVAL)
 
         #inode =  # max(self.inodes) + 1 # len(self.inodes)+1
@@ -530,10 +500,8 @@ class Operations(pyfuse3.Operations):
                                
         return await self.getattr(new_file.inode)
 
-    
-    async def read(self, fh, offset, length, whole=False): 
-        start_time = time.time()       
-        
+
+    async def retrieve_data(self, fh, offset, length, whole=False):
         try:
             l = len(self.inodes[fh].data)
         except:
@@ -573,15 +541,18 @@ class Operations(pyfuse3.Operations):
 
             if start_blk == 0 and end_blk == 0:
                 if not whole:                    
-                    data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
+                    data = await get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)
+                    data = data[offset:end_offset]
                 else:
                     # if start_diff < 0:
                     #     start_blk = max(0, start_blk -1)
-                    data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)[offset:end_offset]
+                    data = await get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)
+                    data = data[offset:end_offset]
                     
                     return start_diff, start_blk, end_blk, data
             else:
-                data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
+                # data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, max(0,start_blk-1), end_blk)
+                data = await get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
 
                 if whole:
                     if start_diff < 0:
@@ -608,34 +579,47 @@ class Operations(pyfuse3.Operations):
         if data is None:
             data = b''
 
+        return data
+
+    
+    async def read(self, fh, offset, length, whole=False): 
+        start_time = time.time()       
+        
+        data = await self.retrieve_data(fh, offset, length, whole=False)
+
         # print(humanbytes(len(data)/ (time.time()- start_time))+"/s")
         # print("Time taken -> " + str(time.time()-start) + " Data Length:" + str(len(data)))
         self.stat_msg_queue.put({'INFO:ReadSpeed' : str(len(data)/ (time.time()- start_time))})
 
+        self.inodes[fh].atime_ns = time.time_ns()
+
         return data
+
     
-    async def fsync(self, fh, datasync):
-        '''Flush buffers for open file *fh*
+    # async def fsync(self, fh, datasync):
+    #     '''Flush buffers for open file *fh*
 
-        If *datasync* is true, only the file contents should be
-        flushed (in contrast to the metadata about the file).
+    #     If *datasync* is true, only the file contents should be
+    #     flushed (in contrast to the metadata about the file).
 
-        *fh* will by an integer filehandle returned by a prior `open` or
-        `create` call.
-        '''
-        # print("Datasync: " + str(fh))
+    #     *fh* will by an integer filehandle returned by a prior `open` or
+    #     `create` call.
+    #     '''
+    #     # print("Datasync: " + str(fh))
 
-    async def flush(self, fh):
-        '''Handle close() syscall.
+    # async def flush(self, fh):
+    #     '''Handle close() syscall.
 
-        *fh* will by an integer filehandle returned by a prior `open` or
-        `create` call.
+    #     *fh* will by an integer filehandle returned by a prior `open` or
+    #     `create` call.
 
-        This method is called whenever a file descriptor is closed. It may be
-        called multiple times for the same open file (e.g. if the file handle
-        has been duplicated).
-        '''
-        # print("Flush:" + str(fh))
+    #     This method is called whenever a file descriptor is closed. It may be
+    #     called multiple times for the same open file (e.g. if the file handle
+    #     has been duplicated).
+    #     '''
+    #     print("Flush:" + str(fh))
+
+    #     return 0
 
     async def release(self, fh):
         '''Release open file
@@ -652,7 +636,7 @@ class Operations(pyfuse3.Operations):
         This method may return an error by raising `FUSEError`, but the error
         will be discarded because there is no corresponding client request.
         '''
-        # print("Release:" + str(fh))
+        print("Release:" + str(fh))
 
         self.inode_open_count[fh] -= 1
 
@@ -664,14 +648,9 @@ class Operations(pyfuse3.Operations):
 
     async def write(self, fh, offset, buf):                
         buf = memoryview(buf)
-        # f = None
-
+        
         f = self.inodes[fh]
-
-        # for i in list(self.inodes.keys()):
-        #     if self.inodes.get(i).inode == fh:
-        #         f = self.inodes[i]
-        #         break
+        
         append = False
         if offset >= f.size:
             append = True
@@ -679,59 +658,55 @@ class Operations(pyfuse3.Operations):
         if end_offset > f.size: # and offset==f.size:
             f.size = end_offset
 
-        if offset == 0 and len(self.inodes[fh].offsets) > 0 or len(self.inodes[fh].data) == 0 or end_offset == self.inodes[fh].size or append == True:
+        if False:#offset == 0 and len(self.inodes[fh].offsets) > 0 or len(self.inodes[fh].data) == 0 or end_offset == self.inodes[fh].size or append == True:
             data = f.data
             data += await dedup(buf, self.stat_msg_queue)
             self.inodes[fh].data = data
         
         else: # offset != 0:
-            start_diff, start_block, end_block, data = await self.read(fh, offset, len(buf), whole=True)            
+            try:            
+                start_diff, start_block, end_block, data = await self.retrieve_data(fh, offset, len(buf), whole=True)
+            except ValueError:
+                data = b''
 
             if data == b'':
                 data = f.data
-                data = await dedup(buf, self.stat_msg_queue)
+                data += await dedup(buf, self.stat_msg_queue)
                 self.inodes[fh].data = data
 
             else:
                 buf = bytearray(buf)
-                if start_diff < 0:
-                    start_diff = start_diff * -1
-                for x in range((offset-offset)+start_diff, end_offset-offset):                    
-                    try:
-                        data[x] = buf.pop(0)
-                    except IndexError:
-                        data += buf
-                        break
 
-                for i in range(start_block, end_block+1):
-                    try:
-                        self.inodes[fh].data.pop(i)
-                    except IndexError:
-                        break
-                    except KeyError:
-                        break
-                
+                # data[offset-start_diff:end_offset] = buf
+                data[(offset-offset)+start_diff:end_offset-offset] = buf
                 new_data = await dedup(data, self.stat_msg_queue)
-                for i in new_data:                
-                    self.inodes[fh].data.insert(start_block, i)
+                
+                # for x in range((offset-offset)+start_diff, end_offset-offset):                    
+                #     try:
+                #         data[x] = buf.pop(0)
+                #     except IndexError:
+                #         data += buf
+                #         break
+
+                # for i in range(start_block, end_block+1):
+                #     try:
+                #         self.inodes[fh].data.pop(i)
+                #     except IndexError:
+                #         break
+                #     except KeyError:
+                #         break
+                
+                # new_data = await dedup(data, self.stat_msg_queue)
+                for i in new_data:
+                    self.inodes[fh].data[start_block] = i
+                    # self.inodes[fh].data.insert(start_block, i)
                     start_block = start_block + 1
         
         
         self.inodes[fh].size = f.size                
         self.inodes[fh].offsets = []
 
-        # dirs = self.dirs
-        # inodes = self.inodes
-
-        
-        # inodes = self.inodes            # Coloca os dados do FS de volta na memória compartilhada para pode ser acessada e persistida
-
-        # snapshot = tracemalloc.take_snapshot()
-        # top_stats = snapshot.statistics('lineno', cumulative=True)
-        # os.system('clear')
-        # print("[ Top 10 ]")
-        # for stat in top_stats[:20]:
-        #     print(stat)
+        self.inodes[fh].mtime_ns = time.time_ns()
 
         return len(buf)
 
@@ -947,7 +922,7 @@ async def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
                                 else:
                                     ds.next_write_position = ds.next_write_position + len(q['data'])
                                 q['chunk'] = ds.chunk
-                                if ds.next_write_position + max_blk_size > ds.size:
+                                if ds.next_write_position + (max_blk_size*10) > ds.size:
                                     ds.IS_FULL = True
                                 break
                             elif idx != len(datastore)-1:
@@ -985,12 +960,7 @@ async def write_new_blocks(_queued_writes, wq, resq, swq, stat_msg_queue):
                     update_index(q['hash'], q['chunk'], True, stat_msg_queue)
 
                     if len(q['compressed_data']) <= small_block_limit:
-                        small_block_read_cache[q['hash']] = q['data']
-
-                    try:
-                        del write_read_cache[q['hash']]
-                    except KeyError:
-                        continue
+                        small_block_read_cache[q['hash']] = q['data']                    
 
                     registers_processed = registers_processed + 1
                     if q['compressed']:
@@ -1082,7 +1052,7 @@ async def dedup(data, stat_msg_queue):
     return blk_list
 
 
-def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offset=0, end_offset=0):    
+async def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offset=0, end_offset=0):    
     global datastore
     global allocation_unit
     global hash_table
@@ -1126,6 +1096,8 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                 _block = hash_table[b.hash].offset
                 _hash = hash_table[b.hash].hash
                 read_size = hash_table[b.hash].size
+
+                d = await single_read(_hash, _block, datastore[_chunk].path, read_size)
             except KeyError:
                 time.sleep(0.001)
                 d = seek_in_cache(b.hash)
@@ -1137,34 +1109,44 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                 _hash = hash_table[b.hash].hash
                 read_size = hash_table[b.hash].size
 
-            if os.path.isfile(datastore[_chunk].path):
-                with open(datastore[_chunk].path, "r+b", buffering=over_read_limit) as f:
-                    mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_READ)
-                    mm.seek(_block)
-                    r = mm.read(read_size + over_read_limit)
-                    # mm.madvise(mmap.MADV_DONTNEED)
-                    mm.close()
-                    # del mm
+                d = await single_read(_hash, _block, datastore[_chunk].path, read_size)
+            # if os.path.isfile(datastore[_chunk].path):
+            #     with open(datastore[_chunk].path, "r+b", buffering=over_read_limit) as f:
+            #         mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_READ)
+            #         mm.seek(_block)
+            #         r = mm.read(read_size + over_read_limit)
+            #         # mm.madvise(mmap.MADV_DONTNEED)
+            #         mm.close()
+            #         # del mm
                                     
-                d = r[:read_size]
-                r = r[read_size:]
+            #     d = r[:read_size]
+            #     r = r[read_size:]
                 
-                if hash_table[b.hash].compressed:
-                        decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
-                else:
-                    decompresed_data = d
-
-                    read_cache[_hash] = decompresed_data
+            #     if hash_table[b.hash].compressed:
+            #             decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
+            #     else:
+            #         decompresed_data = d
                 
-                d = decompresed_data
+            #     d = decompresed_data
 
+            # else:
+            #     print("IOError when trying to read physical media")
+            #     print(traceback.format_exc())
+            #     raise IOError
+
+        if d is None or b.hash != hash_data(d):
+            time.sleep(0.001)
+            d = seek_in_cache(b.hash)
+            time.sleep(0.001)
+            if d is None:
+                d = await single_read(b.hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, hash_table[b.hash].size)
+            if b.hash != hash_data(d):
+                print('Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash')
             else:
-                print("IOError when trying to read physical media")
-                print(traceback.format_exc())
-                raise IOError
-
-        if b.hash != hash_data(d):
-            print('Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash')
+                read_cache[_hash] = d
+        else:
+            read_cache[b.hash] = d
+        
         if d is not None:                
             data += d
             bytes_processed = bytes_processed + len(d)
@@ -1182,7 +1164,30 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
     return data
 
 
-def seek_in_cache(_blk_hash):
+async def single_read(_hash, _block, ds_path, read_size):
+    try:
+        if os.path.isfile(ds_path):
+            with open(ds_path, "r+b", buffering=over_read_limit) as f:
+                mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_READ)
+                mm.seek(_block)
+                r = mm.read(read_size + over_read_limit)            
+                mm.close()            
+                                
+            d = r[:read_size]
+                    
+            if hash_table[_hash].compressed:
+                decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
+            else:
+                decompresed_data = d
+            
+            d = decompresed_data
+
+            return d
+    except:
+        return None
+
+
+def seek_in_cache(_blk_hash):    
     try:
         return read_cache[_blk_hash]
     except KeyError:
@@ -1209,6 +1214,7 @@ def write_small_block_to_disk(swq, stat_msg_queue):
     while True:
         try:
             if not swq.empty():
+                print("SWQ -> " + str(wq.qsize()))
                 start = time.time()
                 d_hash, d_data = swq.get(False)                
                 written = write_small_block(d_hash, bytearray(d_data), stat_msg_queue)                
@@ -1227,6 +1233,7 @@ def write_to_disk(wq, resq, stat_msg_queue):
         bytes_written = 0
         start = time.time()        
         if not wq.empty():
+            print("WQ -> " + str(wq.qsize()))
             try:
                 q, datastore = wq.get(False)                
                 
@@ -1240,7 +1247,12 @@ def write_to_disk(wq, resq, stat_msg_queue):
                         written = mm.write(q['data'])           
                     # mm.madvise(mmap.MADV_DONTNEED)                    
                     mm.close()
-                    del mm                    
+                    del mm
+
+                try:
+                    del write_read_cache[q['hash']]
+                except KeyError:
+                    continue
                                     
             except ValueError:
                 print("ValueError Writing data to the disk: Chunk:{}, Block:{}, Data Size:{}".format(q['chunk'], q['block'], len(q['compressed_data'])))
