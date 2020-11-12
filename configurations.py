@@ -50,10 +50,13 @@ small_block_read_cache =LRU(maxlen=small_block_cache_size)
 dummy_mult = 1024
 dummy_allocation_unit = 1024*dummy_mult
 allocation_unit = 1024
-min_blk_size = allocation_unit*16
-mean_blk_size = allocation_unit*32
-max_blk_size = allocation_unit*64
+
+mean_blk_size = allocation_unit*64
+min_blk_size = mean_blk_size//4
+max_blk_size = mean_blk_size * 8
+
 small_block_limit = min_blk_size // 4    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
+
 block_negative_limit = -4
 deletion_grace_period = 60
 
