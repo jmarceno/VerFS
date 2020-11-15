@@ -2,15 +2,19 @@ from numba import jit
 from numba.typed import List
 
 
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 
-def take_closest(myList, myNumber):
+def take_closest(myList, myNumber, left=True):
     """
     Assumes myList is sorted. Returns closest value to myNumber.
 
     If two numbers are equally close, return the smallest number.
     """
-    pos = bisect_left(myList, myNumber)
+    if left:
+        pos = bisect_left(myList, myNumber)
+    else:
+        pos = bisect_right(myList, myNumber)
+
     if pos == 0:
         return myList[0], pos
     if pos == len(myList):

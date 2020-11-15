@@ -76,6 +76,7 @@ class File_Inode:
         self.rdev = 0
         self.data = [] # Tuple with hash and size
         self.offsets = []
+        self.no_compression = False
 
     
 
@@ -93,10 +94,11 @@ class Block:
 
 
 class FileBlock:
-    def __init__(self, _hash, _size):
-        self.hash = _hash
-        self.size = _size
-
+    def __init__(self, _hash, _size, _raw_size):
+        self.hash = _hash # Block hash at the hash table
+        self.size = _size # Block size with compression
+        self.raw_size = _raw_size # Block size without compression
+    
 
 class SmallBlock:
     def __init__(self, _hash, _size, _deflated_size, _data):
