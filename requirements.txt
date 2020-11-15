@@ -1,5 +1,6 @@
 fastcdc
 xxhash==2.0.0
+sqlitedict
 pyfuse3
 asciitree
 astroid
@@ -35,7 +36,11 @@ wrapt
 zipp
 zope.interface
 flask
+psutil
 flask_wtf
 flask_sqlalchemy
 email_validator
 python-decouple
+lmdb
+zmq
+numba

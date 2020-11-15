@@ -563,7 +563,7 @@ class Operations(pyfuse3.Operations):
             #     await self.calc_offsets(fh)                
                 
             
-            blk, blk_number = take_closest(self.inodes[fh].offsets, offset)            
+            blk, blk_number = take_closest(self.inodes[fh].offsets, offset, left=True)            
             if offset != 0:
                 if blk == offset:
                     start_blk = blk_number + 1
@@ -575,27 +575,33 @@ class Operations(pyfuse3.Operations):
                         start_blk = blk_number
                         start_diff = blk - offset
             
-            blk_e, blk_number_e = take_closest(self.inodes[fh].offsets, end_offset)                        
+            blk_e, blk_number_e = take_closest(self.inodes[fh].offsets, end_offset, left=True)                        
             if blk_e == end_offset:
                 end_blk = blk_number_e
             else:
                 end_diff = blk_e - end_offset
                 end_blk = blk_number_e
 
+            if start_blk > end_blk:
+                breakpoint
+                print("stop")
+
             if start_blk == 0 and end_blk == 0:
                 if not whole:                    
-                    data = await get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)
+                    data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)
                     data = data[offset:end_offset]
                 else:
-                    # if start_diff < 0:
-                    #     start_blk = max(0, start_blk -1)
-                    data = await get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)
+                    if start_diff < 0:
+                        print("Negative START_DIFF")
+                        # start_blk = max(0, start_blk -1)                    
+                    data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)
                     # data = data[offset:end_offset]
                     
                     return start_diff, start_blk, end_blk, data
             else:
                 # data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, max(0,start_blk-1), end_blk)
-                data = await get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
+                data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
+                backupdata = data
 
                 if whole:
                     if start_diff < 0:
@@ -610,13 +616,13 @@ class Operations(pyfuse3.Operations):
                     if start_blk == 0:
                         data = data[offset:]
                     elif offset > 0 and start_diff > 0:
-                        data = data[self.inodes[fh].data[start_blk].size-start_diff:]
-                    if end_diff > 0 and len(data) > (end_offset-offset):
+                        data = data[self.inodes[fh].data[start_blk].raw_size-start_diff:]
+                    if end_diff != 0 and len(data) > (end_offset-offset):
                         data = data[:-end_diff]
             
 
             if len(data) != (end_offset - offset):
-                print("Returning wrong length data @ [async def read]. Is this intended?")
+                print("Returning wrong length data @ [async def retrieve data]. Is this intended?")
                 return data
 
         if data is None:
@@ -683,6 +689,7 @@ class Operations(pyfuse3.Operations):
         '''
         # print("Release:" + str(fh))
 
+        
         self.inode_open_count[fh] -= 1
 
         if self.inode_open_count[fh] == 0:
@@ -693,9 +700,9 @@ class Operations(pyfuse3.Operations):
             #     self.inodes.pop(fh)
     
 
-    async def calc_offsets(self, fh):
+    def calc_offsets(self, fh):
         blks = [0]                
-        [blks.append(x.size+blks[len(blks)-1]) for x in self.inodes[fh].data]
+        [blks.append(x.raw_size+blks[len(blks)-1]) for x in self.inodes[fh].data]
         blks.pop(0)
         self.inodes[fh].offsets  = blks
 
@@ -706,12 +713,12 @@ class Operations(pyfuse3.Operations):
         
         f = self.inodes[fh]
         
-        append = False
-        if offset >= f.size:
-            append = True
+        # append = False
+        # if offset >= f.size:
+        #     append = True
         end_offset = offset + len(buf)
-        if end_offset > f.size: # and offset==f.size:
-            f.size = end_offset
+        # if end_offset > f.size: # and offset==f.size:
+        #     f.size = end_offset
 
         if False: #offset == 0 and len(self.inodes[fh].offsets) > 0 or len(self.inodes[fh].data) == 0 or end_offset == self.inodes[fh].size or append == True:
             data = f.data
@@ -719,10 +726,24 @@ class Operations(pyfuse3.Operations):
             self.inodes[fh].data = data
         
         else: # offset != 0:
-            try:            
-                start_diff, start_block, end_block, data = await self.retrieve_data(fh, offset, len(buf), whole=True)
-            except ValueError:
+            if offset != self.inodes[fh].size:
+                try:                            
+                    start_diff, start_block, end_block, data = await self.retrieve_data(fh, offset, len(buf), whole=True)
+
+                    # y = 0 # JUST CODE TO VALIDATE SOME STUFF
+                    # for x, s in enumerate(self.inodes[fh].data,start_block):
+                    #     if x > end_block:
+                    #         break
+                    #     y = y + s.raw_size
+
+                    # if y != len(data):
+                    #     print("puta quila merda")
+
+                except ValueError:
+                    data = b''
+            else:
                 data = b''
+            
 
             if data == b'':
                 data = f.data
@@ -733,7 +754,7 @@ class Operations(pyfuse3.Operations):
                 buf = bytearray(buf)
 
                 # data[offset-start_diff:end_offset] = buf
-                data[(offset-offset)+max(0,start_diff):end_offset-offset] = buf
+                data[max(0,start_diff):end_offset-offset+max(0,start_diff)] = buf
                 new_data = await dedup(data, self.stat_msg_queue)
                 
                 # for x in range((offset-offset)+start_diff, end_offset-offset):                    
@@ -758,11 +779,14 @@ class Operations(pyfuse3.Operations):
                     start_block = start_block + 1
         
         
-        self.inodes[fh].size = f.size
-        await self.calc_offsets(fh)
+        # self.inodes[fh].size = f.size
+        self.calc_offsets(fh)
+        self.inodes[fh].size = self.inodes[fh].offsets[-1]
         # self.inodes[fh].offsets = []
 
         self.inodes[fh].mtime_ns = time.time_ns()
+
+        await write_new_blocks(write_buffer, resq, self.stat_msg_queue)
 
         return len(buf)
 
@@ -1005,15 +1029,16 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                             
                             if random.randrange(0,10) == 0:
                                 stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})
-
-                            try:
-                                del write_read_cache[q['hash']]
-                            except KeyError:
-                                continue
+                            
                         except:
                             print('Error sending data to the flusing queue')
                             print(traceback.format_exc())
                        
+                    try:
+                        del write_read_cache[q['hash']]
+                    except KeyError:
+                        continue
+
                     q['result'] = True                    
                     hash_table[q['hash']] = Block()
                     hash_table[q['hash']].hash = q['hash']
@@ -1024,8 +1049,8 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                     hash_table[q['hash']].compressed = q['compressed']
                     update_index(q['hash'], q['chunk'], True, stat_msg_queue)
 
-                    if len(q['compressed_data']) <= small_block_limit:
-                        small_block_read_cache[q['hash']] = q['data']                    
+                    # if len(q['compressed_data']) <= small_block_limit:
+                    #     small_block_read_cache[q['hash']] = q['data']                    
 
                     registers_processed = registers_processed + 1
                     if q['compressed']:
@@ -1073,7 +1098,7 @@ async def dedup(data, stat_msg_queue):
             _hashed_data = hash_data(data)
             blk_list.append(0)
             if _hashed_data in hash_table:
-                blk_list[len(blk_list)-1] = FileBlock(_hashed_data, len(data))
+                blk_list[len(blk_list)-1] = FileBlock(_hashed_data, hash_table[_hashed_data].size, hash_table[_hashed_data].deflated_sise)
                 update_index(_hashed_data)
             else:
                 q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': bytearray(data), 'result': False}
@@ -1081,7 +1106,7 @@ async def dedup(data, stat_msg_queue):
                 q['creation_time'] = time.time()
 
                 # q = QueuedWrite(len(blk_list)-1, _hashed_data, bytearray(data))
-                blk_list[q['idx']] = FileBlock(_hashed_data, len(data))
+                blk_list[q['idx']] = FileBlock(_hashed_data, len(q['compressed_data']), len(q['data']))
                 write_read_cache[_hashed_data] = data
                 write_buffer.append(q)
                 bytes_processed = bytes_processed + len(data)
@@ -1091,14 +1116,14 @@ async def dedup(data, stat_msg_queue):
                 blk_list.append(0)
 
                 if c.hash in hash_table:
-                    blk_list[len(blk_list)-1] = FileBlock(c.hash, len(c.data))
+                    blk_list[len(blk_list)-1] = FileBlock(c.hash, hash_table[c.hash].size, hash_table[c.hash].deflated_size)
                     update_index(c.hash)
                 else:
                     q = {'idx':len(blk_list)-1, 'hash':c.hash, 'data': bytearray(c.data), 'result': False}
                     q['compressed'], q['compressed_data'] = await compress_data(q['data'])
                     q['creation_time'] = time.time()
                     # q = QueuedWrite(len(blk_list)-1, c.hash, bytearray(c.data))
-                    blk_list[q['idx']] = FileBlock(c.hash, len(c.data))
+                    blk_list[q['idx']] = FileBlock(c.hash, len(q['compressed_data']), len(q['data']))
                     write_read_cache[c.hash] = c.data
                     write_buffer.append(q)
 
@@ -1117,7 +1142,7 @@ async def dedup(data, stat_msg_queue):
     return blk_list
 
 
-async def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offset=0, end_offset=0):    
+def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offset=0, end_offset=0):    
     global datastore
     global allocation_unit
     global hash_table
@@ -1135,15 +1160,15 @@ async def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None
 
         d = seek_in_cache(b.hash)
         if d is not None:
-            if len(d) != b.size:
+            if len(d) != b.raw_size:
                 print("DEBUG: Invalid data on cache entry")
                 d = None
                 del read_cache[b.hash]
-        if d is None and len(r) > b.size:
-            if hash_data(r[:hash_table[b.hash].size]) == b.hash:
-                d = r[:b.size]
-                r = r[b.size:]
-                read_cache[b.hash] = d        
+        # if d is None and len(r) > b.size: #TODO: Over read. Remove ? Reimplement ?
+        #     if hash_data(r[:hash_table[b.hash].size]) == b.hash:
+        #         d = r[:b.size]
+        #         r = r[b.size:]
+        #         read_cache[b.hash] = d        
         
         if d is None and hash_table[b.hash].chunk == -1:
             try:
@@ -1160,9 +1185,9 @@ async def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None
                 _chunk = hash_table[b.hash].chunk
                 _block = hash_table[b.hash].offset
                 _hash = hash_table[b.hash].hash
-                read_size = hash_table[b.hash].size
+                read_size = b.size
 
-                d = await single_read(_hash, _block, datastore[_chunk].path, read_size)
+                d =  single_read(_hash, _block, datastore[_chunk].path, read_size)
             except KeyError:
                 time.sleep(0.001)
                 d = seek_in_cache(b.hash)
@@ -1172,9 +1197,9 @@ async def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None
                 _chunk = hash_table[b.hash].chunk
                 _block = hash_table[b.hash].offset
                 _hash = hash_table[b.hash].hash
-                read_size = hash_table[b.hash].size
+                read_size = b.size
 
-                d = await single_read(_hash, _block, datastore[_chunk].path, read_size)
+                d = single_read(_hash, _block, datastore[_chunk].path, read_size)
             # if os.path.isfile(datastore[_chunk].path):
             #     with open(datastore[_chunk].path, "r+b", buffering=over_read_limit) as f:
             #         mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_READ)
@@ -1204,7 +1229,7 @@ async def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None
             d = seek_in_cache(b.hash)
             time.sleep(0.001)
             if d is None:
-                d = await single_read(b.hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, hash_table[b.hash].size)
+                d = single_read(b.hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, b.size)
             if b.hash != hash_data(d):
                 print('Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash')
             else:
@@ -1229,7 +1254,7 @@ async def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None
     return data
 
 
-async def single_read(_hash, _block, ds_path, read_size):
+def single_read(_hash, _block, ds_path, read_size):
     try:
         if os.path.isfile(ds_path):
             with open(ds_path, "r+b", buffering=over_read_limit) as f:
