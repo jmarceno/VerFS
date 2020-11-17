@@ -38,9 +38,9 @@ import struct
 from hashing import hashed_chunks, hash_data
 from stats import Timer, humanbytes, memory
 from compression import compressed_pickle, decompress_pickle, decompress_data, compress_data
-from BTrees import IOBTree
+# from BTrees import IOBTree
 from collections import OrderedDict, deque
-from functools import lru_cache
+# from functools import lru_cache
 import pyfuse3
 import errno
 import stat
@@ -48,6 +48,7 @@ from time import time
 import logging
 from collections import defaultdict
 from pyfuse3 import FUSEError
+import threading
 from argparse import ArgumentParser
 import trio
 import traceback
@@ -60,7 +61,7 @@ from persistence import init_persistance, persist_data
 from stats import unix_memory, resident, stacksize
 import mq_client
 from utils import take_closest, offsets
-from numba import jit
+# from numba import jit
 
 # import builtins
 # import line_profiler
@@ -218,10 +219,9 @@ class Operations(pyfuse3.Operations):
             return False
 
 
-    async def unlink(self, inode_p, name,ctx):
+    def _unlink(self, inode_p, name, ctx, entry):
         print("unlink entry")
-        await self.lock.acquire()        
-        entry = await self.lookup(inode_p, name)
+        # entry = await self.lookup(inode_p, name)
         
         if stat.S_ISDIR(entry.st_mode):
             raise pyfuse3.FUSEError(errno.EISDIR)
@@ -232,15 +232,31 @@ class Operations(pyfuse3.Operations):
         self.inodes[entry.st_ino].st_nlink = self.inodes[entry.st_ino].st_nlink - 1
         self.inodes[entry.st_ino].list_on_dir_lookup = False
         print("unlink exit")
-        self.lock.release()
+
+
+    async def unlink(self, inode_p, name,ctx):        
+        entry = await self.lookup(inode_p, name)
+
+        timer = threading.Timer(forget_timer, self._unlink, args=(inode_p, name, ctx, entry))
+        timer.start()  # after 60 seconds, 'callback' will be called
+
+        # print("unlink entry")
+        # # await self.lock.acquire()        
+        # entry = await self.lookup(inode_p, name)
+        
+        # if stat.S_ISDIR(entry.st_mode):
+        #     raise pyfuse3.FUSEError(errno.EISDIR)
+        
+        # # pyfuse3.invalidate_entry_async(inode_p, name, deleted=0, ignore_enoent=True)
+
+        # self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count - 1        
+        # self.inodes[entry.st_ino].st_nlink = self.inodes[entry.st_ino].st_nlink - 1
+        # self.inodes[entry.st_ino].list_on_dir_lookup = False
+        # print("unlink exit")
+        # # self.lock.release()
         
 
-    async def forget(self, inode_list):
-        '''Decrease lookup counts for inodes in *inode_list*
-        *inode_list* is a list of ``(inode, nlookup)`` '''
-        
-        await self.lock.acquire()
-        
+    def _forget(self, inode_list):
         for n in inode_list:
             try:
                 if self.inodes[n[0]].inode != pyfuse3.ROOT_INODE:      
@@ -258,7 +274,34 @@ class Operations(pyfuse3.Operations):
         
         print(inode_list)
 
-        self.lock.release()
+
+    async def forget(self, inode_list):
+        '''Decrease lookup counts for inodes in *inode_list*
+        *inode_list* is a list of ``(inode, nlookup)`` '''
+        
+        timer = threading.Timer(forget_timer, self._forget, args=inode_list)
+        timer.start()  # after 60 seconds, 'callback' will be called
+
+        # await self.lock.acquire()
+        
+        # for n in inode_list:
+        #     try:
+        #         if self.inodes[n[0]].inode != pyfuse3.ROOT_INODE:      
+        #             self.inodes[n[0]].lookup_count = self.inodes[n[0]].lookup_count - n[1]
+        #             if self.inodes[n[0]].lookup_count <= 0:
+                        
+        #                 self.inodes[n[0]].list_on_dir_lookup = False
+        #                 pyfuse3.invalidate_entry_async(self.inodes[n[0]].parent_inode, self.inodes[n[0]].name, deleted=0, ignore_enoent=True)
+
+        #                 # self._remove(self.inodes[n[0]].parent_inode, self.inodes[n[0]].name, await self.getattr(n[0]))
+        #         else:
+        #             self.inodes[n[0]].lookup_count = 1
+        #     except:                
+        #         pass
+        
+        # print(inode_list)
+
+        # self.lock.release()
 
     async def rmdir(self, inode_p, name, ctx):
         entry = await self.lookup(inode_p, name)
@@ -272,8 +315,8 @@ class Operations(pyfuse3.Operations):
         
         self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count - 1
 
-        if self.inodes[entry.st_ino].lookup_count == 0:
-            pyfuse3.invalidate_entry_async(self.inodes[entry.st_ino].parent_inode, self.inodes[entry.st_ino].name, deleted=0, ignore_enoent=True)
+        # if self.inodes[entry.st_ino].lookup_count == 0:
+        pyfuse3.invalidate_entry_async(self.inodes[entry.st_ino].parent_inode, self.inodes[entry.st_ino].name, deleted=0, ignore_enoent=True)
         
                 
 
@@ -695,7 +738,11 @@ class Operations(pyfuse3.Operations):
         if self.inode_open_count[fh] == 0:
             del self.inode_open_count[fh]
             if self.inodes[fh].st_nlink == 0:
-                self._remove(self.inodes[fh].parent_inode, self.inodes[fh].name, await self.getattr(fh))            
+
+                timer = threading.Timer(forget_timer, self._remove, args=(self.inodes[fh].parent_inode, self.inodes[fh].name, await self.getattr(fh)))
+                timer.start()  # after 60 seconds, 'callback' will be called
+            
+                # self._remove(self.inodes[fh].parent_inode, self.inodes[fh].name, await self.getattr(fh))            
             # if (await self.getattr(fh)).st_nlink == 0:
             #     self.inodes.pop(fh)
     

@@ -87,3 +87,5 @@ smb_write_threads = 3
 bb_write_threads = 3
 
 writer_thread_mem_limit = 1073741824 * 2
+
+forget_timer = 2.0
