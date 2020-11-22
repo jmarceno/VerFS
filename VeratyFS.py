@@ -245,12 +245,11 @@ class Operations(pyfuse3.Operations):
             try:
                 if self.inodes[n[0]].inode != pyfuse3.ROOT_INODE:      
                     self.inodes[n[0]].lookup_count = self.inodes[n[0]].lookup_count - n[1]
-                    if self.inodes[n[0]].lookup_count <= 0:
+                    if self.inodes[n[0]].st_nlink <= 0:
                         
-                        self.inodes[n[0]].list_on_dir_lookup = False
+                        # self.inodes[n[0]].list_on_dir_lookup = False
                         pyfuse3.invalidate_entry_async(self.inodes[n[0]].parent_inode, self.inodes[n[0]].name, deleted=0, ignore_enoent=True)
-
-                        # self._remove(self.inodes[n[0]].parent_inode, self.inodes[n[0]].name, await self.getattr(n[0]))
+                        self._remove(self.inodes[n[0]].parent_inode, self.inodes[n[0]].name, await self.getattr(n[0]))
                 else:
                     self.inodes[n[0]].lookup_count = 1
             except:                
@@ -270,9 +269,10 @@ class Operations(pyfuse3.Operations):
             if self.inodes[i].parent_inode == entry.st_ino and self.inodes[i].list_on_dir_lookup == True:
                 raise FUSEError(errno.ENOTEMPTY)       
         
+        self.inodes[entry.st_ino].st_nlink = self.inodes[entry.st_ino].st_nlink - 1
         self.inodes[entry.st_ino].lookup_count = self.inodes[entry.st_ino].lookup_count - 1
 
-        if self.inodes[entry.st_ino].lookup_count == 0:
+        if self.inodes[entry.st_ino].st_nlink == 0:
             pyfuse3.invalidate_entry_async(self.inodes[entry.st_ino].parent_inode, self.inodes[entry.st_ino].name, deleted=0, ignore_enoent=True)
         
                 
@@ -1098,7 +1098,7 @@ async def dedup(data, stat_msg_queue):
             _hashed_data = hash_data(data)
             blk_list.append(0)
             if _hashed_data in hash_table:
-                blk_list[len(blk_list)-1] = FileBlock(_hashed_data, hash_table[_hashed_data].size, hash_table[_hashed_data].deflated_sise)
+                blk_list[len(blk_list)-1] = FileBlock(_hashed_data, hash_table[_hashed_data].size, hash_table[_hashed_data].deflated_size)
                 update_index(_hashed_data)
             else:
                 q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': bytearray(data), 'result': False}

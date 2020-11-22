@@ -1,3 +1,5 @@
+cffi
+Cython
 fastcdc
 xxhash==2.0.0
 sqlitedict
@@ -5,12 +7,10 @@ pyfuse3
 asciitree
 astroid
 BTrees
-cffi
 click
 click-default-group
 codetiming
 colorama
-Cython
 fasteners
 humanize
 importlib-metadata
