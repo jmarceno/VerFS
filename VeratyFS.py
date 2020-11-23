@@ -19,7 +19,6 @@ VeratyFS File System
 import os
 import sys
 import multiprocessing as mp
-import queue
 import random
 # If we are running from the pyfuse3 source directory, try
 # to load the module from there first.
@@ -51,6 +50,7 @@ import gc
 
 from datastructures import *
 from configurations import *
+from smbs import write_small_block, read_small_block, delete_small_block
 from persistence import init_persistance, persist_data
 from stats import unix_memory, resident, stacksize
 from utils import take_closest, offsets

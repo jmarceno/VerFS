@@ -50,18 +50,13 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
                 del mm
 
         else:
-            f = open(os.path.join(datastore_base_path, 'chunk'+str(chunk)+'.ds.vfs'), "wb")
-            # if "win" in str(platform.platform()):
+            f = open(os.path.join(datastore_base_path, 'chunk'+str(chunk)+'.ds.vfs'), "wb")            
             n = (65).to_bytes(64, byteorder='little')
             f.write(n)
             f.truncate(chunk_size)
             f.flush()
             f.close()
-            datastore.append(DataStore(chunk, chunk_size, chunk_path))
-            # ds = open(chunk_path, "r+b")
-            # tmp_map = mmap.mmap(ds.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)            
-            # tmp_map.close()
-            # ds.close()
+            datastore.append(DataStore(chunk, chunk_size, chunk_path))            
 
             if not os.path.isfile(free_blocks_path):
                 free_blocks.append(IOBTree.IOBTree())

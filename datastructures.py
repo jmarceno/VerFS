@@ -1,25 +1,6 @@
-# import debugpy
-# debugpy.debug_this_thread()
-
-import traceback
-from BTrees import IOBTree
 from collections import deque
 import time
 from compression import compress_data
-import os
-import _pickle as cPickle
-import json
-import base64
-
-from sqlitedict import SqliteDict
-from os import path
-
-import rocksdb
-from utils import opt
-# import lmdb
-
-max_map_size = (1073741824*1024)
-small_block_db_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "small_blocks")
 
 
 class Garbage_Collector:
@@ -57,11 +38,8 @@ class QueuedWrite:
             self.compressed = True
 
     def __compress__(self):
-        compressed, d = compress_data(self.data)
-        # d = len(d).to_bytes(2, byteorder='little') + d
-
-        return d
-
+        return compress_data(self.data)
+        
 
 class File_Inode:
     def __init__(self, _id):
@@ -118,73 +96,3 @@ class SmallBlock:
     
         if _size == _deflated_size:
             self.compressed = True
-
-
-
-def write_small_block(_hash, data, stat_msg_queue):    
-    # env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
-    # with env.begin(write=True) as txn:
-    #     try:
-    #         txn.put(_hash.encode(), data)
-    #         txn.commit()            
-    #     except:
-    #         print(traceback.format_exc())
-    #         return 0
-    # try:
-    #     with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
-    #         smbs[_hash] = data
-    #         smbs.commit()
-    # except:
-    #     print(traceback.format_exc())
-        
-    
-    smbs = rocksdb.DB(small_block_db_path, opt())
-    smbs.put(_hash.encode(), bytes(data))
-
-    return len(data)
-
-
-def read_small_block(_hash, stat_msg_queue):    
-    smbs = rocksdb.DB(small_block_db_path, opt())
-
-    return smbs.get(_hash.encode())
-    # try:
-    #     env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
-    #     with env.begin() as txn:
-    #         with txn.cursor() as curs:
-    #             return txn.get(_hash.encode())
-    # except:
-    #     print(traceback.format_exc())
-    #     return False   
-    # with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
-    #     try:
-    #         return smbs[_hash]
-    #     except:
-    #         print(traceback.format_exc())
-    #         return b''
-    
-
-def delete_small_block(_hash, stat_msg_queue):    
-    smbs = rocksdb.DB(small_block_db_path, opt())
-    try:
-        smbs.delete(_hash.encode())
-        return True
-    except:
-        print(traceback.format_exc())
-        return False
-    # try:
-    #     env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
-    #     with env.begin(write=True) as txn:
-    #         txn.delete(_hash.encode())
-    #         return True
-    # except:
-    #     print(traceback.format_exc())
-    #     return False
-    #  with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
-    #     try:
-    #         del smbs[_hash]
-    #         smbs.commit()
-    #         return True
-    #     except:
-    #         print(traceback.format_exc())
-    #         return False
