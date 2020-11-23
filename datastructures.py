@@ -14,7 +14,9 @@ import base64
 from sqlitedict import SqliteDict
 from os import path
 
-import lmdb
+import rocksdb
+from utils import opt
+# import lmdb
 
 max_map_size = (1073741824*1024)
 small_block_db_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "small_blocks")
@@ -27,12 +29,16 @@ class Garbage_Collector:
 
 
 class DataStore:
-    def __init__(self, _chunk, _chunk_size, _path):
+    def __init__(self, _chunk, _chunk_size, _path, _next_write_position=0):
         self.chunk = _chunk
         self.size = _chunk_size
         self.path = _path
-        self.next_write_position = 0
-        self.IS_FULL = False
+        self.next_write_position = _next_write_position
+
+        if self.next_write_position + ((64*1024)*10) > self.size:
+            self.IS_FULL = True
+        else:
+            self.IS_FULL = False
 
 
 class QueuedWrite:
@@ -82,9 +88,9 @@ class File_Inode:
 
 class Block:
     def __init__(self):
-        self.chunk = 0
-        self.offset = 0  # Offset dentro do chunk
         self.hash = ""
+        self.chunk = 0
+        self.offset = 0  # Offset dentro do chunk        
         self.size = 0  # Tamanho depois da compressao
         self.deflated_size = 0  # Tamanho sem compressao
         self.uses = 1
@@ -114,6 +120,7 @@ class SmallBlock:
             self.compressed = True
 
 
+
 def write_small_block(_hash, data, stat_msg_queue):    
     # env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
     # with env.begin(write=True) as txn:
@@ -123,17 +130,24 @@ def write_small_block(_hash, data, stat_msg_queue):
     #     except:
     #         print(traceback.format_exc())
     #         return 0
-    try:
-        with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
-            smbs[_hash] = data
-            smbs.commit()
-    except:
-        print(traceback.format_exc())
+    # try:
+    #     with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
+    #         smbs[_hash] = data
+    #         smbs.commit()
+    # except:
+    #     print(traceback.format_exc())
+        
+    
+    smbs = rocksdb.DB(small_block_db_path, opt())
+    smbs.put(_hash.encode(), bytes(data))
 
     return len(data)
 
 
 def read_small_block(_hash, stat_msg_queue):    
+    smbs = rocksdb.DB(small_block_db_path, opt())
+
+    return smbs.get(_hash.encode())
     # try:
     #     env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
     #     with env.begin() as txn:
@@ -142,15 +156,22 @@ def read_small_block(_hash, stat_msg_queue):
     # except:
     #     print(traceback.format_exc())
     #     return False   
-    with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
-        try:
-            return smbs[_hash]
-        except:
-            print(traceback.format_exc())
-            return b''
+    # with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
+    #     try:
+    #         return smbs[_hash]
+    #     except:
+    #         print(traceback.format_exc())
+    #         return b''
     
 
-def delete_small_block(_hash, stat_msg_queue):
+def delete_small_block(_hash, stat_msg_queue):    
+    smbs = rocksdb.DB(small_block_db_path, opt())
+    try:
+        smbs.delete(_hash.encode())
+        return True
+    except:
+        print(traceback.format_exc())
+        return False
     # try:
     #     env = lmdb.open(small_block_db_path, max_dbs=0, map_size=max_map_size)
     #     with env.begin(write=True) as txn:
@@ -159,11 +180,11 @@ def delete_small_block(_hash, stat_msg_queue):
     # except:
     #     print(traceback.format_exc())
     #     return False
-     with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
-        try:
-            del smbs[_hash]
-            smbs.commit()
-            return True
-        except:
-            print(traceback.format_exc())
-            return False
+    #  with SqliteDict(small_block_db_path) as smbs:  # note no autocommit=True
+    #     try:
+    #         del smbs[_hash]
+    #         smbs.commit()
+    #         return True
+    #     except:
+    #         print(traceback.format_exc())
+    #         return False

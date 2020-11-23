@@ -44,3 +44,4 @@ python-decouple
 lmdb
 zmq
 numba
+pickledb

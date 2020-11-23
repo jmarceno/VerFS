@@ -10,7 +10,7 @@
             "request": "launch",
             "module": "tests.test_operations",
             "args": [
-                "/home/jardel/fsteste"
+                "/home/jmarceno/fsteste"
             ]
         },
         {
@@ -20,7 +20,7 @@
             "program": "VeratyFS.py",
             "console": "integratedTerminal",
             "args": [
-                "/home/jardel/fsteste"
+                "/home/jmarceno/fsteste"
             ]
         }
     ]

@@ -6,14 +6,16 @@ from compression import compressed_pickle, decompress_pickle, decompress_data, c
 import os
 import time
 from datastructures import Garbage_Collector
-
+from fsmeta import FSMeta
+from hashtable import HashTable
+# from keyindex import KeyIndex
 """
 Bunch of stuff to test the concept. Change this shit later to something useful fast and safe
 """
 datastore = []
-key_index = {}
-hash_table = {}
-fs_meta = None
+# key_index = KeyIndex()
+hash_table = HashTable()#{}
+# fs_meta = FSMeta()
 fragmentation = {}
 fragmentation['free_size'] = 0
 fragmentation['free_count'] = 0
@@ -25,7 +27,7 @@ performance_measure_bars = False
 free_blocks = []
 GC = Garbage_Collector()
 
-inodes = {} #IOBTree.IOBTree()
+# inodes = FSMeta()#{} #IOBTree.IOBTree()
 dirs = {}
 # contents = {} #OOBTree.OOBTree() #IOBTree.IOBTree()
 
@@ -55,7 +57,7 @@ mean_blk_size = allocation_unit*64
 min_blk_size = mean_blk_size//4
 max_blk_size = mean_blk_size * 8
 
-small_block_limit = min_blk_size // 4    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
+small_block_limit = 0 #min_blk_size // 4    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
 block_negative_limit = -4
 deletion_grace_period = 60
@@ -69,7 +71,7 @@ chunk_size = int(ceil(chunk_size_per_GB * 1073741824))
 datastore_chunks_number = int(ceil(ds_size/chunk_size))  # DataStore chunks equal to one every GB of partition size
 max_write_threads = datastore_chunks_number # Sets the maximum number of writing threads to the number of chunks
 
-key_index_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "key_index.bin")
+# key_index_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "key_index.bin")
 fs_meta_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "fs.meta")
 hash_table_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "hash_table.bin")
 free_blocks_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "free_blocks.bin")
