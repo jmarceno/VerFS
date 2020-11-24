@@ -1299,6 +1299,7 @@ if __name__ == '__main__':
     # init_logging(options.debug)
     operations = Operations(stat_msg_queue)
 
+    # Try cleaning previous mount
     try:
         os.system("fusermount -u "+options.mountpoint)
     except:
