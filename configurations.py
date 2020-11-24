@@ -57,7 +57,7 @@ mean_blk_size = allocation_unit*64
 min_blk_size = mean_blk_size//4
 max_blk_size = mean_blk_size * 8
 
-small_block_limit = 0 #min_blk_size // 4    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
+small_block_limit = min_blk_size // 4    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
 block_negative_limit = -4
 deletion_grace_period = 60

@@ -1,0 +1,1 @@
+rsync -r --progress ~/test_data/* ~/fsteste/

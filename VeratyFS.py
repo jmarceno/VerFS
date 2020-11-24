@@ -46,19 +46,18 @@ from argparse import ArgumentParser
 import trio
 import traceback
 from psutil import virtual_memory
-import gc
 
 from datastructures import *
 from configurations import *
 from smbs import write_small_block, read_small_block, delete_small_block
 from persistence import init_persistance, persist_data
 from stats import unix_memory, resident, stacksize
-from utils import take_closest, offsets
+from utils import take_closest
 import mq_client
 
 from fsmeta import FSMeta
-from hashtable import HashTable
-from keyindex import KeyIndex
+# from hashtable import HashTable
+# from keyindex import KeyIndex
 
 
 # import builtins
@@ -193,7 +192,7 @@ class Operations(pyfuse3.Operations):
     async def readdir(self, inode, off, token):
         dir_entries = []
         [dir_entries.append(self.inodes[x]) for y,x in enumerate(self.inodes, off) if self.inodes[x].parent_inode==inode and self.inodes[x].list_on_dir_lookup]        
-        
+        # dir_entries = self.inodes.get_dir(inode)
         try:
             pyfuse3.readdir_reply(token, dir_entries[off].name, await self.getattr(dir_entries[off].inode), off+1)
             
@@ -433,18 +432,18 @@ class Operations(pyfuse3.Operations):
     async def statfs(self, ctx):
         '''
         unsigned long  f_bsize;    /* Filesystem block size */
-               unsigned long  f_frsize;   /* Fragment size */
-               fsblkcnt_t     f_blocks;   /* Size of fs in f_frsize units */
-               fsblkcnt_t     f_bfree;    /* Number of free blocks */
-               fsblkcnt_t     f_bavail;   /* Number of free blocks for
-                                             unprivileged users */
-               fsfilcnt_t     f_files;    /* Number of inodes */
-               fsfilcnt_t     f_ffree;    /* Number of free inodes */
-               fsfilcnt_t     f_favail;   /* Number of free inodes for
-                                             unprivileged users */
-               unsigned long  f_fsid;     /* Filesystem ID */
-               unsigned long  f_flag;     /* Mount flags */
-               unsigned long  f_namemax;  /* Maximum filename length */
+        unsigned long  f_frsize;   /* Fragment size */
+        fsblkcnt_t     f_blocks;   /* Size of fs in f_frsize units */
+        fsblkcnt_t     f_bfree;    /* Number of free blocks */
+        fsblkcnt_t     f_bavail;   /* Number of free blocks for
+                                        unprivileged users */
+        fsfilcnt_t     f_files;    /* Number of inodes */
+        fsfilcnt_t     f_ffree;    /* Number of free inodes */
+        fsfilcnt_t     f_favail;   /* Number of free inodes for
+                                        unprivileged users */
+        unsigned long  f_fsid;     /* Filesystem ID */
+        unsigned long  f_flag;     /* Mount flags */
+        unsigned long  f_namemax;  /* Maximum filename length */
         '''
 
         stat_ = pyfuse3.StatvfsData()
@@ -458,7 +457,7 @@ class Operations(pyfuse3.Operations):
         stat_.f_blocks = max(0, (partition_size_gb // allocation_unit))
         # stat_.f_blocks = size // stat_.f_frsize
         stat_.f_bfree = max(0, (partition_size_gb - get_usage(self.stat_msg_queue)[2]) // allocation_unit )#stat_.f_blocks - (size // allocation_unit)
-        # stat_.f_bfree = max(size // stat_.f_frsize, 1024) #TODO: WHAT IS THIS SHIT?
+        # stat_.f_bfree = max(size // stat_.f_frsize, 1024)
         stat_.f_bavail = stat_.f_bfree
 
         fs_inodes = len(self.inodes)
@@ -597,7 +596,9 @@ class Operations(pyfuse3.Operations):
 
         if data is None:
             data = b''
-
+        
+        await trio.sleep(0) # Adds a checkpoint so other co-routines have a chance to run
+        
         return data
 
     
@@ -623,6 +624,7 @@ class Operations(pyfuse3.Operations):
     #     '''
     #     # print("Datasync: " + str(fh))
 
+    # @profile
     async def flush(self, fh):
         '''Handle close() syscall.
 
@@ -634,8 +636,11 @@ class Operations(pyfuse3.Operations):
         has been duplicated).
         '''
 
-        await write_new_blocks(write_buffer, resq, self.stat_msg_queue)        
+        await write_new_blocks(write_buffer, resq, self.stat_msg_queue)
+        await trio.sleep(0)
         await self.calc_offsets(fh)
+        await trio.sleep(0)
+        await self.inodes.commit()
 
         return 0
 
@@ -674,13 +679,13 @@ class Operations(pyfuse3.Operations):
 
         return True
 
-
+    # @profile
     async def write(self, fh, offset, buf):
         f = self.inodes[fh]
         
-        end_offset = offset + len(buf)                
+        end_offset = offset + len(buf)            
         
-        if offset != self.inodes[fh].size:
+        if len(f.data) != 0 and f.size != 0 and end_offset < f.size:
             try:                            
                 start_diff, start_block, end_block, data = await self.retrieve_data(fh, offset, len(buf), whole=True)
                 buf = bytearray(buf)
@@ -701,22 +706,21 @@ class Operations(pyfuse3.Operations):
                     start_block = start_block + 1
 
             except ValueError:
-                data = b''
-        else:
-            data = b''
-
-        if data == b'':
+                print(traceback.format_exc())
+                return 0        
+        else:        
             data = f.data
             data += await dedup(buf, self.stat_msg_queue)
             f.data = data            
 
-        f.size = max(self.inodes[fh].size, offset+len(buf))
+        
+        f.size = max(f.size, offset+len(buf))
 
         f.mtime_ns = time.time_ns()
         
         self.inodes[fh] = f
 
-        await write_new_blocks(write_buffer, resq, self.stat_msg_queue)
+        # await write_new_blocks(write_buffer, resq, self.stat_msg_queue)
 
         return len(buf)
 
@@ -880,7 +884,7 @@ async def update_datastore_info(ds:DataStore):
         mm.close()
         del mm
 
-
+# @profile
 async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
     """
     Writes a series of blocks that where quede
@@ -1006,7 +1010,7 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
     for ds in datastore:
         await update_datastore_info(ds)
            
-
+# @profile
 async def dedup(data, stat_msg_queue):        
     global hash_table    
     global read_cache
@@ -1019,7 +1023,7 @@ async def dedup(data, stat_msg_queue):
     bytes_processed = 0
 
     if type(data) == bytearray or type(data) == bytes or type(data) == memoryview:
-        if type(data) != memoryview:
+        if type(data) == memoryview:
             data = bytearray(data)
         
         if len(data) <= min_blk_size:
@@ -1030,7 +1034,7 @@ async def dedup(data, stat_msg_queue):
                 update_index(_hashed_data)
             else:
                 q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': bytearray(data), 'result': False}
-                q['compressed'], q['compressed_data'] = await compress_data(q['data'])
+                q['compressed'], q['compressed_data'] = False, q['data'] #await compress_data(q['data'])
                 q['creation_time'] = time.time()
 
                 # q = QueuedWrite(len(blk_list)-1, _hashed_data, bytearray(data))
@@ -1039,7 +1043,7 @@ async def dedup(data, stat_msg_queue):
                 write_buffer.append(q)
                 bytes_processed = bytes_processed + len(data)
         else:
-            ch = await variable_chunks(memoryview(data))
+            ch = await variable_chunks(data)
             for c in ch:
                 blk_list.append(0)
 
@@ -1209,7 +1213,8 @@ async def usage(stat_msg_queue):
             stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
             last_time = time.time()
         await trio.sleep(60)
-        # prof.dump_stats('readdir_profile.lprof')        
+        # prof.dump_stats('write_new_blocks.lprof')
+        # print(".")       
 
 
 '''

@@ -1,6 +1,7 @@
 import rocksdb
 import os
 import traceback
+from utils import opt
 
 max_map_size = (1073741824*1024)
 small_block_db_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "small_blocks")
