@@ -16,6 +16,7 @@ VeratyFS File System
 
 # tracemalloc.start()
 
+from math import log
 import os
 import sys
 import multiprocessing as mp
@@ -47,6 +48,7 @@ import trio
 import traceback
 from psutil import virtual_memory
 
+from logger import LogEvent
 from datastructures import *
 from configurations import *
 from smbs import write_small_block, read_small_block, delete_small_block
@@ -278,8 +280,10 @@ class Operations(pyfuse3.Operations):
                     del self.inodes[k]
                     break
                 except KeyError:
-                    print(traceback.format_exc())
-                    print("Key already removed? Index Inconsistance at self.inodes")
+                    LogEvent(("ERROR",traceback.format_exc()))
+                    pass
+                    # print(traceback.format_exc())
+                    # print("Key already removed? Index Inconsistance at self.inodes")
 
 
     async def symlink(self, inode_p, name, target, ctx):
@@ -373,7 +377,8 @@ class Operations(pyfuse3.Operations):
 
         entry_p = await self.getattr(new_inode_p)
         if entry_p.st_nlink == 0:
-            print('Attempted to create entry '+ str(new_name) + 'with unlinked parent '+ str(new_inode_p))
+            LogEvent(("ERROR",'Attempted to create entry '+ str(new_name) + 'with unlinked parent '+ str(new_inode_p)))
+            # print('Attempted to create entry '+ str(new_name) + 'with unlinked parent '+ str(new_inode_p))
             raise FUSEError(errno.EINVAL)
                 
         ni = File_Inode(self.gen_inode_number())
@@ -503,7 +508,8 @@ class Operations(pyfuse3.Operations):
     async def _create(self, inode_p, name, mode, ctx, rdev=0, target=None):        
 
         if (await self.getattr(inode_p)).st_nlink == 0:
-            print('Attempted to create entry '+ str(name) + 'with unlinked parent '+ str(inode_p))
+            LogEvent(("ERROR",'Attempted to create entry '+ str(name) + 'with unlinked parent '+ str(inode_p)))
+            # print('Attempted to create entry '+ str(name) + 'with unlinked parent '+ str(inode_p))
             raise FUSEError(errno.EINVAL)
 
         now_ns = time.time_ns()        
@@ -564,8 +570,7 @@ class Operations(pyfuse3.Operations):
                 end_blk = blk_number_e
 
             if start_blk > end_blk:
-                breakpoint
-                print("stop")
+                LogEvent(("ERROR","Error reading data"))
 
             if start_blk == 0 and end_blk == 0:
                 if not whole:                    
@@ -573,7 +578,7 @@ class Operations(pyfuse3.Operations):
                     data = data[offset:end_offset]
                 else:
                     if start_diff < 0:
-                        print("Negative START_DIFF")
+                        LogEvent(("ERROR","Negative START_DIFF"))                        
                     data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk + 1)
                     
                     return start_diff, start_blk, end_blk, data
@@ -590,7 +595,7 @@ class Operations(pyfuse3.Operations):
                     data = data[-(end_offset-offset):]
                 else:
                     if start_diff < 0:
-                        print(start_diff)
+                        LogEvent(("ERROR","Negative START_DIFF"))
                     if start_blk == 0:
                         data = data[offset:]
                     elif offset > 0 and start_diff > 0:
@@ -600,7 +605,7 @@ class Operations(pyfuse3.Operations):
             
 
             if len(data) != (end_offset - offset):
-                print("Returning wrong length data @ [async def retrieve data]. Is this intended?")
+                LogEvent(("ERROR","Returning wrong length data @ [async def retrieve data]. Is this intended?"))                
                 return data
 
         if data is None:
@@ -718,7 +723,7 @@ class Operations(pyfuse3.Operations):
                     start_block = start_block + 1
 
             except ValueError:
-                print(traceback.format_exc())
+                LogEvent(("ERROR",traceback.format_exc()))                
                 return 0        
         else:        
             data = f.data
@@ -804,7 +809,7 @@ def garbage_collector(stat_msg_queue):
                     if hash_table[remove].size <= small_block_limit:
                         r = delete_small_block(remove, stat_msg_queue)
                         if not r:
-                            print("DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete.")                
+                            LogEvent(("ERROR","DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete."))                            
                     else:
                         try:
                             free_blocks[hash_table[remove].chunk].get(hash_table[remove].size).append(hash_table[remove].offset)                    
@@ -878,7 +883,7 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
                 h.uses = h.uses + 1
                 hash_table[idx] = h                
         except Exception:
-            print(traceback.format_exc())
+            LogEvent(("ERROR",traceback.format_exc()))            
             raise IOError
 
     return True
@@ -957,13 +962,13 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                                         break
                                     except ValueError:
                                         if ds == len(free_blocks) - 1:
-                                            print("Partition FULL. No free blocks that can fit the data.")
+                                            LogEvent(("INFO","Partition FULL. No free blocks that can fit the data."))                                            
                                             raise IOError
                                         else:
                                             continue                    
                         try:
                             with open(datastore[q['chunk']].path, "r+b") as f:
-                                mm = mmap.mmap(f.fileno(), length=datastore[q['chunk']].size, access=mmap.ACCESS_WRITE)                                
+                                mm = mmap.mmap(f.fileno(), length=datastore[q['chunk']].size, access=mmap.ACCESS_WRITE)
                                 mm.seek(q['block'])
                                 if q['compressed']:
                                     written = mm.write(q['compressed_data'])
@@ -977,8 +982,8 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                                 stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})
                             
                         except:
-                            print('Error sending data to the flusing queue')
-                            print(traceback.format_exc())
+                            stat_msg_queue.put_nowait({'DEBUG' : "Error writing data to disk"})
+                            LogEvent(("ERROR",traceback.format_exc()))                            
                        
                     try:
                         del write_read_cache[q['hash']]
@@ -1007,7 +1012,7 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                     continue                    
 
                 except Exception:
-                    print(traceback.format_exc()) 
+                    LogEvent(("ERROR",traceback.format_exc()))
             else:                
                 registers_processed = registers_processed + 1                
                 if q['compressed']:
@@ -1075,9 +1080,8 @@ async def dedup(data, stat_msg_queue):
 
                 bytes_processed = bytes_processed + len(c.data)
 
-    else:
-        print("Value Error when preparing writes")
-        print(traceback.format_exc())
+    else:        
+        LogEvent(("ERROR",traceback.format_exc()))
         raise ValueError
     
     if random.randrange(0,10) == 1:
@@ -1099,7 +1103,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
         d = seek_in_cache(b.hash)
         if d is not None:
             if len(d) != b.raw_size:
-                print("DEBUG: Invalid data on cache entry")
+                LogEvent(("DEBUG","Invalid cache entry"))
                 d = None
                 try:
                     del read_cache[b.hash]
@@ -1113,8 +1117,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                         d = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read                    
                 small_block_read_cache[b.hash] = d
             except Exception:
-                print("Block Size:"+str(b.size))
-                print(traceback.format_exc())
+                LogEvent(("ERROR",traceback.format_exc()))
                 raise IOError
    
 
@@ -1135,9 +1138,9 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
 
         else:
             if d is None:
-                print("d is none")
+                LogEvent(("ERROR",'Block not found!!!'))
             else:
-                print('Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash')
+                LogEvent(("ERROR",'Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash'))                
             raise IOError         
         
     return data
@@ -1260,6 +1263,7 @@ async def parent(stat_msg_queue):
     print("Starting main process coodenator...")
     async with trio.open_nursery() as nursery:
         try:
+            LogEvent(("INFO","STARTING"))
             print("Starting: PyFuse Main...")
             nursery.start_soon(pyfuse3.main)
 
@@ -1272,7 +1276,7 @@ async def parent(stat_msg_queue):
         except KeyboardInterrupt:
             sys.exit(-1)
         except:
-            print(traceback.format_exc())
+            LogEvent(("ERROR",traceback.format_exc()))            
 
 '''
 
@@ -1313,7 +1317,7 @@ if __name__ == '__main__':
         trio.run(par)    
     except KeyboardInterrupt:
         pyfuse3.close(unmount=True)
-        print(traceback.format_exc())
+        LogEvent(("ERROR",traceback.format_exc()))
         print("TODO: REDO THAT FOR MP - Persisting remaining data...")
         os.system("clear")
         # prof.print_stats()
