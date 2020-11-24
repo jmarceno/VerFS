@@ -40,24 +40,8 @@ class FSMeta(MutableMapping):
             del self.d[k]
             
     def __setitem__(self, k, v:File_Inode):
-        # while self.lock:
-        #     time.sleep(0)
-
         self.d[k] = v
         self.pending[k] = v
-        
-        # if v.parent_inode in self.dirs:
-        #     self.dirs[v.parent_inode].append(k)
-        # else:
-        #     self.dirs[v.parent_inode] = [k]
-
-    # def get_dir(self, k:int, off=0):
-    #     dirs = []
-    #     for i in self.dirs[k]:
-    #         if self.d[i].list_on_dir_lookup:
-    #             dirs.append(self.d[i])
-        
-    #     return dirs[off:]
 
     async def commit(self):
         self.lock = True
@@ -69,15 +53,6 @@ class FSMeta(MutableMapping):
         
         self.save_to_disk(cp)
 
-        # for k, v in cp.items():
-        #     try:                
-        #         self.save_to_disk(k, v)
-        #     except:
-        #         print(traceback.format_exc())
-        #         pass
-        # del cp
-            
-            
     
     '''
     Disk Operations
@@ -120,11 +95,6 @@ class FSMeta(MutableMapping):
                 vi.lookup_count = 1
                 vi.list_on_dir_lookup = True
                 self.d[ki] = vi
-
-                # if vi.parent_inode in self.dirs:
-                #     self.dirs[vi.parent_inode].append(ki)
-                # else:
-                #     self.dirs[vi.parent_inode] = [ki]
             
             return self            
         except:

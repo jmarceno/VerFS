@@ -50,9 +50,6 @@ class HashTable(MutableMapping):
         self.d[k] = v
         self.pending[k] = v
 
-        # if self.save_to_disk(k, v):
-        #     self.d[k] = v
-
         
     async def commit(self):
         self.lock = True
@@ -71,8 +68,7 @@ class HashTable(MutableMapping):
     def save_to_disk(self, cp:dict):
         batch = rocksdb.WriteBatch()
         try:
-            for k, v in cp.items():                
-                # n = (k).to_bytes(64, byteorder='little')
+            for k, v in cp.items():                            
                 batch.put(k.encode(), pickle.dumps(v))
 
             self.ht.write(batch)

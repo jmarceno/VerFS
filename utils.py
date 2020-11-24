@@ -1,4 +1,3 @@
-
 from bisect import bisect_left, bisect_right
 
 import rocksdb
@@ -32,13 +31,13 @@ def take_closest(ordList, myNumber, left=True):
 def opt():
     opts = rocksdb.Options()
     opts.create_if_missing = True
-    opts.max_open_files = 3000
-    opts.write_buffer_size = 50*1024*1024
-    opts.max_write_buffer_number = 3000
+    opts.max_open_files = 30000
+    opts.write_buffer_size = 500*1024*1024
+    opts.max_write_buffer_number = 30000
     opts.target_file_size_base = 67108864    
     opts.compression = rocksdb.CompressionType.snappy_compression #rocksdb.CompressionType.zlib_compression# rocksdb.CompressionType.no_compression
     opts.delete_obsolete_files_period_micros = 1000000 * 10
-    opts.keep_log_file_num = 10    
+    opts.keep_log_file_num = 10  
     opts.allow_mmap_reads = True
     opts.allow_mmap_writes = True
     opts.manual_wal_flush = True
@@ -48,7 +47,7 @@ def opt():
     opts.avoid_unnecessary_blocking_io = True
     opts.two_write_queues = True
     opts.unordered_write= True
-    opts.max_background_jobs = 20
+    opts.max_background_jobs = 10
     
     
     opts.table_factory = rocksdb.BlockBasedTableFactory(checksum='xxhash', filter_policy=rocksdb.BloomFilterPolicy(10),
