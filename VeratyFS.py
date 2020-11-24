@@ -1148,7 +1148,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
             # bytes_processed = bytes_processed + len(d)
         else:
             if d is None:
-                print("d ino none")
+                print("d is none")
             else:
                 print('Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash')
             raise IOError         

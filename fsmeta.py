@@ -1,7 +1,5 @@
 import os
-from pickle import TRUE
 import traceback
-import time
 import pickle
 import rocksdb
 

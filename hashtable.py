@@ -1,10 +1,7 @@
 from collections.abc import MutableMapping
 
-from sqlitedict import SqliteDict
 import rocksdb
 from utils import opt, load_configuration
-
-from datastructures import Block
 import os
 import traceback
 import pickle

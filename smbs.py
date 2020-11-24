@@ -1,5 +1,4 @@
 import rocksdb
-import os
 import traceback
 from utils import opt, load_configuration
 
