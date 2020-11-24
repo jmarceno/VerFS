@@ -7,11 +7,11 @@ import rocksdb
 
 from collections.abc import MutableMapping
 from datastructures import File_Inode
-from utils import opt
+from utils import opt, load_configuration
 
+confs = load_configuration()
 
-fs_meta_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "fs.meta")
-
+fs_meta_path = confs['fs_meta_path']
 
 class FSMeta(MutableMapping):    
     def __init__(self, *a, **k):
@@ -67,13 +67,15 @@ class FSMeta(MutableMapping):
         
         self.lock = False
         
-        for k, v in cp.items():
-            try:                
-                self.save_to_disk(k, v)
-            except:
-                print(traceback.format_exc())
-                pass
-        del cp
+        self.save_to_disk(cp)
+
+        # for k, v in cp.items():
+        #     try:                
+        #         self.save_to_disk(k, v)
+        #     except:
+        #         print(traceback.format_exc())
+        #         pass
+        # del cp
             
             
     
@@ -81,14 +83,19 @@ class FSMeta(MutableMapping):
     Disk Operations
     '''
 
-    def save_to_disk(self, k, val:File_Inode):
-        try:            
-            n = (k).to_bytes(64, byteorder='little')
-            self.ht.put(n, pickle.dumps(val))
+    def save_to_disk(self, cp:dict):
+        batch = rocksdb.WriteBatch()
+        try:
+            for k, v in cp.items():                
+                n = (k).to_bytes(64, byteorder='little')
+                batch.put(n, pickle.dumps(v))
+
+            self.ht.write(batch)
             return True
+        
         except:
             print(traceback.format_exc())
-            return False
+            pass
         
 
     def remove_from_disk(self, k):

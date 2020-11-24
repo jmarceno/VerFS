@@ -2,21 +2,23 @@ from collections.abc import MutableMapping
 
 from sqlitedict import SqliteDict
 import rocksdb
-from utils import opt
+from utils import opt, load_configuration
 
 from datastructures import Block
 import os
 import traceback
-import time
 import pickle
 
+import multiprocessing as mp
 
-hash_table_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "hash_table.bin")
+confs = load_configuration()
 
+hash_table_path = confs['hash_table_path']
 
 class HashTable(MutableMapping):    
     def __init__(self, *a, **k):
-        self.d = dict(*a, **k)        
+        self.d = dict(*a, **k)
+        self.pending = {}
         
         self.ht = rocksdb.DB(hash_table_path, opt())        
 
@@ -30,7 +32,12 @@ class HashTable(MutableMapping):
         return len(self.d)
 
     def __getitem__(self, k):        
-        return self.d[k]
+        if k in self.d:
+            return self.d[k]
+        elif k in self.pending[k]:
+            return self.pending[k]
+        else:
+            raise KeyError
     
     def __contains__(self, k):
         return k in self.d
@@ -40,21 +47,40 @@ class HashTable(MutableMapping):
             del self.d[k]
 
     def __setitem__(self, k, v):
-        if self.save_to_disk(k, v):
-            self.d[k] = v
+        self.d[k] = v
+        self.pending[k] = v
+
+        # if self.save_to_disk(k, v):
+        #     self.d[k] = v
+
+        
+    async def commit(self):
+        self.lock = True
+        
+        cp = self.pending.copy()
+        self.pending = {}
+        
+        self.lock = False
+        
+        self.save_to_disk(cp)
 
     '''
     Disk Operations
     '''
 
-    def save_to_disk(self, k, val):                
+    def save_to_disk(self, cp:dict):
+        batch = rocksdb.WriteBatch()
         try:
-            self.ht.put(k.encode(), pickle.dumps(val))                        
+            for k, v in cp.items():                
+                # n = (k).to_bytes(64, byteorder='little')
+                batch.put(k.encode(), pickle.dumps(v))
+
+            self.ht.write(batch)
             return True
-            
+        
         except:
             print(traceback.format_exc())
-            return False
+            pass
 
     def remove_from_disk(self, k):                
         try:

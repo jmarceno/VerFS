@@ -1,11 +1,11 @@
 import rocksdb
 import os
 import traceback
-from utils import opt
+from utils import opt, load_configuration
 
-max_map_size = (1073741824*1024)
-small_block_db_path = os.path.join(os.getcwd(), '..', '..', 'metadata', "small_blocks")
+confs = load_configuration()
 
+small_block_db_path = confs['small_block_db_path']
 
 def write_small_block(_hash, data, stat_msg_queue):
     smbs = rocksdb.DB(small_block_db_path, opt())

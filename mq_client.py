@@ -1,26 +1,21 @@
-#
-#   Hello World client in Python
-#   Connects REQ socket to tcp://localhost:5555
-#   Sends "Hello" to server, expects "World" back
-#
 
 import zmq
 import json
 import traceback
 import queue
+from utils import load_configuration
+
+confs = load_configuration()
 
 def send_message(stat_msg_queue):
 
-    server = 'tcp://localhost:5555'
+    server = 'tcp://'+confs['web_interface']
     retries = 0        
     context = zmq.Context()
     socket = context.socket(zmq.REQ)
 
     while True:
-        msg = stat_msg_queue.get()
-        # if stat_msg_queue.qsize() > 1000:
-        #     for i in range(1000):
-        #         stat_msg_queue.get()
+        msg = stat_msg_queue.get()        
         if type(msg) != dict:
             msg = 'Wrong data type: message provided to client was not a dict'            
         try:
@@ -34,6 +29,5 @@ def send_message(stat_msg_queue):
                     except queue.Empty:
                         break
                 
-        except:
-            #print(traceback.format_exc())
+        except:            
             continue

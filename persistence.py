@@ -5,7 +5,8 @@ from configurations import *
 from datastructures import DataStore
 import mmap
 import copy
-import platform
+from BTrees import IOBTree
+
 
 def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, _GC=None):    
     from configurations import free_blocks_path, datastore_base_path, gc_path
@@ -13,7 +14,7 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
     global datastore    
     global free_blocks
     global GC
-    global fragmentation
+    global fragmentation   
 
     print("Setting-up File System Metadata")
     
@@ -42,8 +43,7 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
             
             with open(chunk_path, "r+b") as f:
                 mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)        
-                mm.seek(0)
-                # d = pickle.loads(mm.read(64))
+                mm.seek(0)                
                 d = int.from_bytes(mm.read(64), "little")
                 datastore.append(DataStore(chunk, chunk_size, chunk_path, d))
                 mm.close()
