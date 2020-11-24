@@ -1052,8 +1052,7 @@ async def dedup(data, stat_msg_queue):
                 q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': bytearray(data), 'result': False}
                 q['compressed'], q['compressed_data'] = False, q['data'] #await compress_data(q['data'])
                 q['creation_time'] = time.time()
-
-                # q = QueuedWrite(len(blk_list)-1, _hashed_data, bytearray(data))
+                
                 blk_list[q['idx']] = FileBlock(_hashed_data, len(q['compressed_data']), len(q['data']))
                 write_read_cache[_hashed_data] = data
                 write_buffer.append(q)
@@ -1095,12 +1094,6 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
 
     data = bytearray()
 
-    # cached = False    
-    # r = bytearray()
-    
-    # start_time = time.time()
-    # bytes_processed = 0
-    
     for b in blklst[start_block:end_block+1]:
 
         d = seek_in_cache(b.hash)
@@ -1123,29 +1116,23 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                 print("Block Size:"+str(b.size))
                 print(traceback.format_exc())
                 raise IOError
-    
-        # _chunk = hash_table[b.hash].chunk
-        # _block = hash_table[b.hash].offset
-        # _hash = hash_table[b.hash].hash
-        # read_size = b.size
+   
 
         if d is None:
             try:
                 d =  single_read(hash_table[b.hash].hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, b.size)
-                # d =  single_read(hash_table[b.hash].chunk, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, b.size)
+
             except KeyError:                
                 d = seek_in_cache(b.hash)
                 if d is not None:
                     break
                 else: 
                     d =  single_read(hash_table[b.hash].hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, b.size)
-                    # d =  single_read(_hash, _block, datastore[_chunk].path, read_size)               
-                    # d =  single_read(hash_table[b.hash].chunk, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, b.size)
 
         if d is not None and b.hash == hash_data(d):
             read_cache[b.hash] = d
             data += d
-            # bytes_processed = bytes_processed + len(d)
+
         else:
             if d is None:
                 print("d is none")
