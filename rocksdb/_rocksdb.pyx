@@ -580,9 +580,15 @@ cdef class BlockBasedTableFactory(PyTableFactory):
             block_size=None,
             block_size_deviation=None,
             block_restart_interval=None,
-            whole_key_filtering=None):
+            whole_key_filtering=None,
+            cache_index_and_filter_blocks=False):
 
         cdef table_factory.BlockBasedTableOptions table_options
+
+        if cache_index_and_filter_blocks:
+            table_options.cache_index_and_filter_blocks = True
+        else:
+            table_options.cache_index_and_filter_blocks = False
 
         if index_type == 'binary_search':
             table_options.index_type = table_factory.kBinarySearch
@@ -1413,6 +1419,7 @@ cdef class Options(ColumnFamilyOptions):
             return self.opts.advise_random_on_open
         def __set__(self, value):
             self.opts.advise_random_on_open = value
+            
 
   # TODO: need to remove -Wconversion to make this work
   # property access_hint_on_compaction_start:
@@ -1489,6 +1496,12 @@ cdef class Options(ColumnFamilyOptions):
             return self.opts.use_direct_reads
         def __set__(self, value):
             self.opts.use_direct_reads = value
+
+    property level_compaction_dynamic_level_bytes:
+        def __get__(self):
+            return self.opts.level_compaction_dynamic_level_bytes
+        def __set__(self, value):
+            self.opts.level_compaction_dynamic_level_bytes = value
 
 
 # Forward declaration

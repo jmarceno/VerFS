@@ -29,6 +29,20 @@ def take_closest(ordList, myNumber, left=True):
 
 
 def opt():
+
+    '''    
+    Recomended Defaults:
+    Source: https://github.com/facebook/rocksdb/wiki/Setup-Options-and-Basic-Tuning
+    cf_options.level_compaction_dynamic_level_bytes = true;
+    options.max_background_compactions = 4;
+    options.max_background_flushes = 2;
+    options.bytes_per_sync = 1048576;
+    options.compaction_pri = kMinOverlappingRatio;
+    table_options.block_size = 16 * 1024;
+    table_options.cache_index_and_filter_blocks = true;
+    table_options.pin_l0_filter_and_index_blocks_in_cache = true;    
+    '''
+
     opts = rocksdb.Options()
     opts.create_if_missing = True
     opts.max_open_files = 300
@@ -48,11 +62,20 @@ def opt():
     opts.two_write_queues = True
     opts.unordered_write= True
     opts.max_background_jobs = 10
+    opts.level_compaction_dynamic_level_bytes = True
+    opts.max_background_compactions = 10
+    opts.max_background_flushes = 2
+    opts.bytes_per_sync = 1048576
+    opts.compaction_pri = rocksdb.CompactionPri().min_overlapping_ratio
     
     
-    opts.table_factory = rocksdb.BlockBasedTableFactory(checksum='xxhash', filter_policy=rocksdb.BloomFilterPolicy(10),
-    block_cache=rocksdb.LRUCache(4 * (1024 ** 3)), block_size=1024*4,
-    block_cache_compressed=rocksdb.LRUCache(2048 * (1024 ** 2)))
+    opts.table_factory = rocksdb.BlockBasedTableFactory(
+    checksum='xxhash',
+    filter_policy=rocksdb.BloomFilterPolicy(10),
+    block_cache=rocksdb.LRUCache(4 * (1024 ** 3)),
+    block_size=16*1024,
+    block_cache_compressed=rocksdb.LRUCache(2048 * (1024 ** 2)),
+    cache_index_and_filter_blocks=True)
 
     return opts
 

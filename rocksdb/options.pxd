@@ -108,6 +108,7 @@ cdef extern from "rocksdb/options.h" namespace "rocksdb":
         cpp_bool unordered_write
         cpp_bool use_direct_io_for_flush_and_compaction 
         cpp_bool use_direct_reads
+        cpp_bool level_compaction_dynamic_level_bytes
         
 
     cdef cppclass ColumnFamilyOptions:
