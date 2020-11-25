@@ -1,0 +1,4 @@
+Compiling PyFuse3
+
+python3 setup.py build_cython
+python3 setup.py build

@@ -8,7 +8,7 @@ import time
 
 confs = load_configuration()
 
-async def LogEvent(event:Tuple):
+def LogEvent(event:Tuple):
     try:
         with open(confs['log_file'], 'at') as f:
             print(str(time.time()) + ":" + str(event[0]) + "->" + str(event[1]), file=f)

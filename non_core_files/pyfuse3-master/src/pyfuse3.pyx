@@ -772,6 +772,9 @@ async def main(int min_tasks=1, int max_tasks=99):
     finally:
         if _notify_queue is not None:
             _notify_queue.put(None)
+        
+
+
 
 def close(unmount=True):
     '''Clean up and ensure filesystem is unmounted
@@ -804,6 +807,7 @@ def close(unmount=True):
 
     mountpoint_b = None
     session = NULL
+
 
 def invalidate_inode(fuse_ino_t inode, attr_only=False):
     '''Invalidate cache for *inode*

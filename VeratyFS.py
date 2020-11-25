@@ -48,6 +48,8 @@ import trio
 import traceback
 from psutil import virtual_memory
 
+import threading
+
 from logger import LogEvent
 from datastructures import *
 from configurations import *
@@ -67,18 +69,23 @@ from fsmeta import FSMeta
 # prof = line_profiler.LineProfiler()
 # builtins.__dict__['profile'] = prof
 
-# try:
-#     import faulthandler
-# except ImportError:
-#     pass
-# else:
-#     faulthandler.enable()
+try:
+    import faulthandler
+except ImportError:
+    pass
+else:
+    faulthandler.enable()
 
-# log = logging.getLogger()
+log = logging.getLogger()
 
-wq = mp.Queue() # Fila de mensagens a serem escritas no disco
-resq = mp.Queue() # Fila com as respostas das mensagens escritas
-swq = mp.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno
+wq = mp.Queue() # Fila de mensagens a serem escritas no disco TODO: REMOVE IN THE FUTURE
+resq = mp.Queue() # Fila com as respostas das mensagens escritas - TODO:REMOVE IN THE FUTURE
+swq = mp.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno TODO: REMOVE DEPRECATED
+
+'''
+Maintain track of the program state. When it is set to false, the auxiliary/service threads are all finish the execution
+'''
+RUNNING = True 
 
 class Operations(pyfuse3.Operations):
     '''An example filesystem that stores all data in memory
@@ -100,13 +107,23 @@ class Operations(pyfuse3.Operations):
         
         self.lock = trio.Lock()
         self.inode_open_count = defaultdict(int)
-        self.stat_msg_queue = stat_msg_queue
-        
+        self.stat_msg_queue = stat_msg_queue        
         self.inodes = FSMeta()
         
-        if len(self.inodes) == 0:        
-            self.init_file_system()                
-        
+        if len(self.inodes) == 0:
+            self.init_file_system()
+
+        self.services = []
+        self.services.append(threading.Thread(target=persist, args=(self.stat_msg_queue,)).start())
+        self.services.append(threading.Thread(target=usage, args=(self.stat_msg_queue,)).start())
+        # self.services[0], self.services[1] = await self.start_services()
+
+    # async def start_services(self):
+    #     a = await trio.to_thread.run_sync(usage, self.stat_msg_queue)
+    #     b = await trio.to_thread.run_sync(persist, self.stat_msg_queue)
+
+    #     return a, b
+
 
     def init_file_system(self):
         '''Initialize file system '''
@@ -549,6 +566,9 @@ class Operations(pyfuse3.Operations):
             end_blk = 0
             end_diff = 0                        
                
+            if len(self.inodes[fh].offsets) == 0:
+                await self.calc_offsets(fh)                
+                await self.inodes.commit()
             
             blk, blk_number = take_closest(self.inodes[fh].offsets, offset, left=True)            
             if offset != 0:
@@ -803,9 +823,9 @@ def garbage_collector(stat_msg_queue):
         while len(GC.remove_uses) > 0:
             remove = GC.remove_uses.popleft()
             hash_table[remove].uses = hash_table[remove].uses - 1
-            if hash_table[remove].uses <= block_negative_limit:
+            if hash_table[remove].uses <= -1:
                 hash_table[remove].DELETED = True
-                if hash_table[remove].DELETION_TIME is not None and time.time() - hash_table[remove].DELETION_TIME > deletion_grace_period:
+                if hash_table[remove].DELETION_TIME is not None and time.time() - hash_table[remove].DELETION_TIME > 5:
                     if hash_table[remove].size <= small_block_limit:
                         r = delete_small_block(remove, stat_msg_queue)
                         if not r:
@@ -1190,33 +1210,31 @@ async def variable_chunks(data):
     return await hashed_chunks(data)
 
 
-async def persist(stat_msg_queue):
+def persist(stat_msg_queue):
    
-    await trio.sleep(5)
     last_time = time.time()    
-    while True:
-        if (time.time() - last_time > gc_interval):    
-            await trio.to_thread.run_sync(garbage_collector, stat_msg_queue)
-            await trio.to_thread.run_sync(persist_data, stat_msg_queue)
-            last_time = time.time()            
-
-        await trio.sleep(60)
+    while RUNNING:
+        if (time.time() - last_time > gc_interval):
+            garbage_collector(stat_msg_queue)
+            persist_data(stat_msg_queue)
+            last_time = time.time()
+        time.sleep(10)
 
     
-async def usage(stat_msg_queue):
+def usage(stat_msg_queue):
     mem = virtual_memory()
 
-    await trio.sleep(1)
+    time.sleep(1)
     last_time = time.time()    
-    while True:        
-        if (time.time() - last_time > usage_interval):  
-            await trio.to_thread.run_sync(get_usage, stat_msg_queue)
+    while RUNNING:        
+        if (time.time() - last_time > usage_interval):              
+            get_usage(stat_msg_queue)
             stat_msg_queue.put({'INFO:TOTAL_MEMORY': mem})
             stat_msg_queue.put({'INFO:Memory (active in use)': unix_memory()})
             stat_msg_queue.put({'INFO:Memory (resident)': resident()})
             stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
             last_time = time.time()
-        await trio.sleep(60)
+        time.sleep(10)
         # prof.dump_stats('get_file_data.lprof')
         # print(".")
 
@@ -1259,24 +1277,21 @@ def parse_args():
 
 
 async def parent(stat_msg_queue):    
-    
+    global RUNNING
+
+    LogEvent(("INFO","Starting main process coodenator"))
     print("Starting main process coodenator...")
     async with trio.open_nursery() as nursery:
         try:
             LogEvent(("INFO","STARTING"))
-            print("Starting: PyFuse Main...")
-            nursery.start_soon(pyfuse3.main)
-
-            print("Starting: Persist...")        
-            nursery.start_soon(persist, stat_msg_queue)
-
-            print("Start: Usage...")
-            nursery.start_soon(usage, stat_msg_queue)
-            
+            print("Starting: Main...")
+            nursery.start_soon(pyfuse3.main, 10, 1000)
+        
         except KeyboardInterrupt:
+            pyfuse3.close(unmount=True)
             sys.exit(-1)
         except:
-            LogEvent(("ERROR",traceback.format_exc()))            
+            LogEvent(("ERROR",traceback.format_exc()))
 
 '''
 
@@ -1296,7 +1311,7 @@ if __name__ == '__main__':
     stat_sender.start()
 
     options = parse_args()
-    # init_logging(options.debug)
+    init_logging(options.debug)
     operations = Operations(stat_msg_queue)
 
     # Try cleaning previous mount
@@ -1309,13 +1324,13 @@ if __name__ == '__main__':
     fuse_options.add('fsname=VeratyFS')
     fuse_options.add('allow_other')    
     fuse_options.discard('default_permissions')    
-    # if options.debug_fuse:
-    #     fuse_options.add('debug')  
+    if options.debug_fuse:
+        fuse_options.add('debug')  
     pyfuse3.init(operations, options.mountpoint, fuse_options)
     
     try:
         par = partial(parent, stat_msg_queue=stat_msg_queue)
-        trio.run(par)    
+        trio.run(par)
     except KeyboardInterrupt:
         pyfuse3.close(unmount=True)
         LogEvent(("ERROR",traceback.format_exc()))
@@ -1324,5 +1339,10 @@ if __name__ == '__main__':
         # prof.print_stats()
         stat_sender.join(2)
         stat_sender.kill()
-    finally:
+    finally:        
         pyfuse3.close(unmount=True)
+        print("Asking nicely for threads to finish")
+        LogEvent(("INFO","Asking nicely for threads to finish"))
+        RUNNING = False
+        stat_sender.join(2)
+        stat_sender.kill()

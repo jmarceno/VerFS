@@ -26,3 +26,5 @@ identity_string : 'VeratyFS@v0.0.1@InLineDedup,FixedStoreSize,GC,Compression,Fix
 q_random : 2 # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue
 
 web_interface : 'localhost:5555'
+
+log_file : /home/jmarceno/metadata/logs.txt
