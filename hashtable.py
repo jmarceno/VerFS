@@ -48,7 +48,7 @@ class HashTable(MutableMapping):
         self.pending[k] = v
 
         
-    async def commit(self):
+    def commit(self):
         self.lock = True
         
         cp = self.pending.copy()

@@ -10,7 +10,7 @@ class Garbage_Collector:
 
 
 class DataStore:
-    def __init__(self, _chunk, _chunk_size, _path, _next_write_position=0):
+    def __init__(self, _chunk, _chunk_size, _path, _next_write_position=65):
         self.chunk = _chunk
         self.size = _chunk_size
         self.path = _path

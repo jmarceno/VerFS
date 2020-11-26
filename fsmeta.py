@@ -1,3 +1,4 @@
+from logger import LogEvent
 import os
 import traceback
 import pickle
@@ -17,10 +18,7 @@ class FSMeta(MutableMapping):
         self.d = dict(*a, **k)
         self.pending = {}
         self.ht = rocksdb.DB(fs_meta_path, opt())
-        self.lock = False
-
-        # self.dirs = {}
-
+        
         if os.path.isdir(fs_meta_path):            
             self.init_from_disk()
         
@@ -32,38 +30,32 @@ class FSMeta(MutableMapping):
 
     def __getitem__(self, k):
         return self.d[k]
-        # i = self.d[k]
-        # if i.hard_link == 0:
-        #     return i
-        # else:
-        #     ic = copy.copy(self.d[i.hard_link])
-        #     ic.inode = k
-        #     ic.parent_inode = self.d[k].parent_inode
-        #     ic.name = self.d[k].name
-        #     ic.st_nlink = self.d[k].st_nlink
-        #     ic.hard_link = self.d[k].hard_link
-        #     return ic
 
     def __delitem__(self, k):
-        if self.remove_from_disk(k):
-            # if self.d[k].hard_link != 0:
-            #     self.d[self.d[k].hard_link].st_nlink = self.d[self.d[k].hard_link].st_nlink - 1
+        if self.remove_from_disk(k):            
+            
+            # if k in self.pending:
+            #     del self.pending[k]
             del self.d[k]
+        else:
+            t = traceback.format_exc()
+            LogEvent(("Error",t))
+            print("not removed from disk")            
             
     def __setitem__(self, k, v:File_Inode):
-        self.d[k] = v
-        self.pending[k] = v
+        if self.save_to_disk(k, v):
+            self.d[k] = v
+        # self.pending[k] = v
 
     async def commit(self):
-        self.lock = True        
-        cp = self.pending.copy()
-        self.pending = {}        
-        self.lock = False        
-        self.save_to_disk(cp)
+        pass
+        # cp = self.pending.copy()
+        # self.pending = {}              
+        # self.save_to_disk(cp)
 
     def decrease_st_nlink(self, k):
         self.d[k].st_nlink = self.d[k].st_nlink - 1
-        self.pending[k] = self.d[k]
+        # self.pending[k] = self.d[k]
 
     def max(self):
         return max(self.d)
@@ -72,13 +64,22 @@ class FSMeta(MutableMapping):
     Disk Operations
     '''
 
-    def save_to_disk(self, cp:dict):
+    def save_to_disk(self, k:int, v:File_Inode):
+        try:
+            n = (k).to_bytes(64, byteorder='little')
+            self.ht.put(n, pickle.dumps(v))
+            return True
+        except:
+            LogEvent(("ERROR",traceback.format_exc()))
+            print(traceback.format_exc())
+
+
+    def batch_save_to_disk(self, cp:dict):
         batch = rocksdb.WriteBatch()
         try:
             for k, v in cp.items():                
                 n = (k).to_bytes(64, byteorder='little')
-                batch.put(n, pickle.dumps(v))
-
+                batch.put(n, pickle.dumps(v))                
             self.ht.write(batch)
             return True
         
@@ -108,7 +109,7 @@ class FSMeta(MutableMapping):
                 vi = pickle.loads(v)
                 vi.lookup_count = 1
                 vi.list_on_dir_lookup = True
-                self.d[ki] = vi
+                self.d[ki] = vi                
             
             return self            
         except:

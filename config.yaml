@@ -11,8 +11,8 @@ min_blk_size : 16
 max_blk_size : 512
 small_block_limit : 8192 #4096  # Blocos com tamanho igual ou menor que este não serão compactados e serão armazenados em um local diferente especificado em small_block_path
 
-partition_size : 80  # Partion size in GB
-chunk_size_per_GB : 4 # Tamanho de cada um dos chunks
+partition_size : 6  # Partion size in GB
+chunk_size_per_GB : 2 # Tamanho de cada um dos chunks TODO: How does this handles fractions?
 
 fs_meta_path : '/home/jmarceno/metadata/filesystem'
 hash_table_path : '/home/jmarceno/metadata/hashtable'

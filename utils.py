@@ -56,7 +56,7 @@ def opt():
     opts.keep_log_file_num = 10  
     opts.allow_mmap_reads = True
     opts.allow_mmap_writes = True
-    opts.manual_wal_flush = True
+    # opts.manual_wal_flush = True # TODO: RE-ENABLE THIS AS IT GIVES GOOD PERFORMANCE IMPROVEMENT. TAKE CARE TO **MANUALLY** FLUSH ALL DATA
     # opts.use_direct_reads = True
     # opts.use_direct_io_for_flush_and_compaction = True
     opts.min_write_buffer_number_to_merge = 2

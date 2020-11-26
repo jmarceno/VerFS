@@ -59,7 +59,7 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
             f.truncate(chunk_size)
             f.flush()
             f.close()
-            datastore.append(DataStore(chunk, chunk_size, chunk_path))            
+            datastore.append(DataStore(chunk, chunk_size, chunk_path, 65))       
 
             if not os.path.isfile(free_blocks_path):
                 free_blocks.append(IOBTree.IOBTree())
