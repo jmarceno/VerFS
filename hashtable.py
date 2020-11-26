@@ -31,7 +31,7 @@ class HashTable(MutableMapping):
     def __getitem__(self, k):        
         if k in self.d:
             return self.d[k]
-        elif k in self.pending[k]:
+        elif k in self.pending:
             return self.pending[k]
         else:
             raise KeyError

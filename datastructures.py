@@ -61,6 +61,7 @@ class File_Inode:
         self.data = [] # Tuple with hash and size
         self.offsets = []
         self.no_compression = False
+        self.hard_link = 0
 
     
 

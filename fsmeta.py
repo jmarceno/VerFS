@@ -2,6 +2,7 @@ import os
 import traceback
 import pickle
 import rocksdb
+import copy
 
 from collections.abc import MutableMapping
 from datastructures import File_Inode
@@ -31,10 +32,22 @@ class FSMeta(MutableMapping):
 
     def __getitem__(self, k):
         return self.d[k]
+        # i = self.d[k]
+        # if i.hard_link == 0:
+        #     return i
+        # else:
+        #     ic = copy.copy(self.d[i.hard_link])
+        #     ic.inode = k
+        #     ic.parent_inode = self.d[k].parent_inode
+        #     ic.name = self.d[k].name
+        #     ic.st_nlink = self.d[k].st_nlink
+        #     ic.hard_link = self.d[k].hard_link
+        #     return ic
 
     def __delitem__(self, k):
         if self.remove_from_disk(k):
-            self.dirs[self.d[k].parent_inode].remove(k)
+            # if self.d[k].hard_link != 0:
+            #     self.d[self.d[k].hard_link].st_nlink = self.d[self.d[k].hard_link].st_nlink - 1
             del self.d[k]
             
     def __setitem__(self, k, v:File_Inode):
@@ -42,15 +55,18 @@ class FSMeta(MutableMapping):
         self.pending[k] = v
 
     async def commit(self):
-        self.lock = True
-        
+        self.lock = True        
         cp = self.pending.copy()
-        self.pending = {}
-        
-        self.lock = False
-        
+        self.pending = {}        
+        self.lock = False        
         self.save_to_disk(cp)
 
+    def decrease_st_nlink(self, k):
+        self.d[k].st_nlink = self.d[k].st_nlink - 1
+        self.pending[k] = self.d[k]
+
+    def max(self):
+        return max(self.d)
     
     '''
     Disk Operations

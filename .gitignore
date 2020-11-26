@@ -137,3 +137,7 @@ dmypy.json
 /Binary Viewer/
 /benchmarks/
 /non_core_files
+tests/test_file.zip
+tests/test_file.csv
+tests/test_file_big.zip
+tests/test_file_medium.zip

@@ -17,7 +17,11 @@ from tempfile import NamedTemporaryFile
 from .util import fuse_test_marker, wait_for_mount, umount, cleanup
 
 basename = os.path.join(os.path.dirname(__file__), '..')
-TEST_FILE = __file__
+# TEST_FILE = __file__
+# TEST_FILE = os.path.join(os.getcwd(), "tests","test_file.csv")
+# TEST_FILE = os.path.join(os.getcwd(), "tests","test_file_medium.zip")
+TEST_FILE = os.path.join(os.getcwd(), "tests","test_file_big.zip")
+
 
 
 with open(TEST_FILE, 'rb') as fh:
@@ -44,12 +48,12 @@ def test_veratyfs(tmpdir):
         tst_chown(mnt_dir)
         tst_chmod(mnt_dir) 
         tst_utimens(mnt_dir)
-        #tst_link(mnt_dir)
+        # tst_link(mnt_dir)
         tst_rename(mnt_dir)
         tst_readdir(mnt_dir)
         tst_statvfs(mnt_dir)
-        #tst_truncate_path(mnt_dir)
-        #tst_truncate_fd(mnt_dir)
+        tst_truncate_path(mnt_dir)
+        tst_truncate_fd(mnt_dir)
         tst_unlink(mnt_dir)
         print("ALL OK")
     except:
@@ -92,10 +96,10 @@ def tst_symlink(mnt_dir):
     print("================")
     linkname = name_generator()
     fullname = mnt_dir + "/" + linkname
-    os.symlink("/home/jardel/link_target", fullname)
+    os.symlink("/home/jmarceno/link_target", fullname)
     fstat = os.lstat(fullname)
     assert stat.S_ISLNK(fstat.st_mode)
-    assert os.readlink(fullname) == "/home/jardel/link_target"
+    assert os.readlink(fullname) == "/home/jmarceno/link_target"
     assert fstat.st_nlink == 1
     assert linkname in os.listdir(mnt_dir)
     checked_unlink(linkname, mnt_dir)
@@ -155,7 +159,8 @@ def tst_write(mnt_dir):
     print("Testing write")
     print("================")
     name = os.path.join(mnt_dir, name_generator())
-    shutil.copyfile(TEST_FILE, name)
+    shutil.copyfile(TEST_FILE, name)       
+    filecmp.clear_cache()
     assert filecmp.cmp(name, TEST_FILE, False)
     checked_unlink(name, mnt_dir)
 
@@ -195,8 +200,9 @@ def tst_link(mnt_dir):
 
     assert os.path.basename(name2) in os.listdir(mnt_dir)
     assert filecmp.cmp(name1, name2, False)
-    os.unlink(name2)
+    os.unlink(name2)    
     fstat1 = os.lstat(name1)
+    print(fstat1)
     assert fstat1.st_nlink == 1
     os.unlink(name1)
 
@@ -261,14 +267,17 @@ def tst_truncate_path(mnt_dir):
     # Add zeros at the end
     os.truncate(filename, size + 1024)
     assert os.stat(filename).st_size == size + 1024
+        
     with open(filename, 'rb') as fh:
         assert fh.read(size) == TEST_DATA
         assert fh.read(1025) == b'\0' * 1024
-
+    
     # Truncate data
     os.truncate(filename, size - 1024)
+
+    
     assert os.stat(filename).st_size == size - 1024
-    with open(filename, 'rb') as fh:
+    with open(filename, 'rb') as fh:        
         assert fh.read(size) == TEST_DATA[:size-1024]
 
     os.unlink(filename)
@@ -294,7 +303,7 @@ def tst_truncate_fd(mnt_dir):
         # Truncate data
         os.ftruncate(fd, size - 1024)
         assert os.fstat(fd).st_size == size - 1024
-        fh.seek(0)
+        fh.seek(0)        
         assert fh.read(size) == TEST_DATA[:size-1024]
 
 def tst_utimens(mnt_dir, ns_tol=0):

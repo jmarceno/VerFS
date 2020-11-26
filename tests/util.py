@@ -16,6 +16,8 @@ import stat
 import subprocess
 import time
 
+UMOUNT_WAIT = 60
+
 def fuse_test_marker():
     '''Return a pytest.marker that indicates FUSE availability
 
@@ -102,11 +104,11 @@ def cleanup(mount_process, mnt_dir):
     mount_process.terminate()
     if isinstance(mount_process, subprocess.Popen):
         try:
-            mount_process.wait(1)
+            mount_process.wait(UMOUNT_WAIT)
         except subprocess.TimeoutExpired:
             mount_process.kill()
     else:
-        mount_process.join(5)
+        mount_process.join(UMOUNT_WAIT)
         if mount_process.exitcode is None:
             mount_process.kill()
 
@@ -120,24 +122,24 @@ def umount(mount_process, mnt_dir):
 
     if isinstance(mount_process, subprocess.Popen):
         try:
-            code = mount_process.wait(5)
+            code = mount_process.wait(UMOUNT_WAIT)
             if code == 0:
                 return
             pytest.fail('file system process terminated with code %s' % (code,))
         except subprocess.TimeoutExpired:
             mount_process.terminate()
             try:
-                mount_process.wait(1)
+                mount_process.wait(UMOUNT_WAIT)
             except subprocess.TimeoutExpired:
                 mount_process.kill()
     else:
-        mount_process.join(5)
+        mount_process.join(20)
         code = mount_process.exitcode
         if code == 0:
             return
         elif code is None:
             mount_process.terminate()
-            mount_process.join(1)
+            mount_process.join(UMOUNT_WAIT)
         else:
             pytest.fail('file system process terminated with code %s' % (code,))
 

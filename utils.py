@@ -9,6 +9,8 @@ def take_closest(ordList, myNumber, left=True):
     Assumes myList is sorted. Returns closest value to myNumber.
 
     If two numbers are equally close, return the smallest number.
+
+    Returns (element,position)
     """
     if left:
         pos = bisect_left(ordList, myNumber)

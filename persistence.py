@@ -24,7 +24,7 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
     if os.path.isfile(free_blocks_path):
         free_blocks = decompress_pickle(free_blocks_path)
         print("Recalculating fragmentation:")
-        free_blocks_path = _free_blocks
+        # free_blocks_path = _free_blocks
         
         for fb in free_blocks:
             if len(list(fb.keys())) > 0: 
@@ -35,6 +35,9 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
     chunk_msg = False
     for chunk in datastore_chunks:        
         chunk_path = os.path.join(datastore_base_path, 'chunk' + str(chunk) + '.ds.vfs')
+        
+        if not os.path.isfile(free_blocks_path):
+            free_blocks.append(IOBTree.IOBTree())
 
         if os.path.isfile(chunk_path):
             if not chunk_msg:

@@ -18,6 +18,7 @@ VeratyFS File System
 
 from math import log
 import os
+from platform import win32_edition
 import sys
 import multiprocessing as mp
 import random
@@ -114,8 +115,8 @@ class Operations(pyfuse3.Operations):
             self.init_file_system()
 
         self.services = []
-        self.services.append(threading.Thread(target=persist, args=(self.stat_msg_queue,)).start())
-        self.services.append(threading.Thread(target=usage, args=(self.stat_msg_queue,)).start())
+        self.services.append(threading.Thread(target=persist, args=(self.stat_msg_queue,), daemon=True).start())
+        self.services.append(threading.Thread(target=usage, args=(self.stat_msg_queue,), daemon=True).start())
         # self.services[0], self.services[1] = await self.start_services()
 
     # async def start_services(self):
@@ -219,8 +220,8 @@ class Operations(pyfuse3.Operations):
             return False
 
 
-    async def unlink(self, inode_p, name,ctx):
-        print("unlink entry")
+    async def unlink(self, inode_p, name, ctx):
+        # print("unlink entry")
         # await self.lock.acquire()
         entry = await self.lookup(inode_p, name)
         
@@ -229,11 +230,22 @@ class Operations(pyfuse3.Operations):
         
         i = self.inodes[entry.st_ino]
         i.lookup_count = i.lookup_count - 1        
-        i.st_nlink = i.st_nlink - 1
+        i.st_nlink = i.st_nlink - 1        
         i.list_on_dir_lookup = False
+
+        # print(i.hard_link)
+        
+        if i.hard_link != 0:
+            self.inodes.decrease_st_nlink(i.hard_link)
+            # x = self.inodes[i.hard_link]
+            # x.st_nlink = x.st_nlink - 1
+            # self.inodes.d[i.hard_link] = x
+            # self.inodes.pending[i.hard_link] = x
+            # print("boo "+str(self.inodes[i.hard_link].st_nlink))
         self.inodes[entry.st_ino] = i
 
         await self.inodes.commit()
+        
         
         # self.lock.release()
         
@@ -260,6 +272,7 @@ class Operations(pyfuse3.Operations):
             except:                
                 pass
         await self.inodes.commit()
+        
         # self.lock.release()
 
 
@@ -277,8 +290,10 @@ class Operations(pyfuse3.Operations):
         i.st_nlink = i.st_nlink - 1
         i.lookup_count = i.lookup_count - 1
         self.inodes[entry.st_ino] = i
+        
 
-        if self.inodes[entry.st_ino].st_nlink == 0:
+        if self.inodes[entry.st_ino].st_nlink == 0:                        
+            self.inodes[entry.st_ino].list_on_dir_lookup = False
             pyfuse3.invalidate_entry_async(self.inodes[entry.st_ino].parent_inode, self.inodes[entry.st_ino].name, deleted=0, ignore_enoent=True)
 
         await self.inodes.commit()
@@ -292,7 +307,7 @@ class Operations(pyfuse3.Operations):
             if v.name == name and v.parent_inode == inode_p:
                 try:
                     f = self.inodes[k].data                    
-                    for i in f.data:
+                    for i in f:
                         update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)
                     del self.inodes[k]
                     break
@@ -386,7 +401,7 @@ class Operations(pyfuse3.Operations):
         
 
     def gen_inode_number(self):        
-        return max(self.inodes) + 1
+        return self.inodes.max() + 1
 
 
     async def link(self, inode, new_inode_p, new_name, ctx):
@@ -401,9 +416,10 @@ class Operations(pyfuse3.Operations):
         ni = File_Inode(self.gen_inode_number())
         ni.name = new_name
         ni.parent_inode = new_inode_p
-        ni.lookup_count = 1        
+        ni.lookup_count = 1
+        ni.hard_link = inode
         self.inodes[ni.inode] = ni        
-        
+                
         i = self.inodes[inode]
         i.st_nlink = i.st_nlink + 1
         self.inodes[inode] = i
@@ -414,17 +430,96 @@ class Operations(pyfuse3.Operations):
 
         return await self.getattr(inode)
         
+    '''
+    Truncates the file *down* to a **new_size**
+    This is a slow operation as it needs to read the file content, apply it to a temporary file
+    then replace the old file metadata with the new one and *free* the remaining blocks
+    '''
+    async def truncate_down(self, fh, new_size):
+        f_new = copy.copy(self.inodes[fh])
+        
+        f_new.data = []
+        f_new.offsets = []
+        f_new.size = 0
 
+        temp_ino = self.gen_inode_number()
+        self.inodes[temp_ino] = f_new
+        
+        try:
+            offset = 0
+            for i in self.inodes[fh].data:
+                if i.raw_size + offset <= new_size:
+                    dat = await self.read(fh, offset, i.raw_size)
+                    written = await self.write(temp_ino, offset, dat)        
+                    offset = offset + written
+                    if offset == new_size:
+                        break
+                else:
+                    dat = await self.read(fh, offset, new_size - offset)
+                    written = await self.write(temp_ino, offset, dat)                
+                    break
+
+            # print("offset "+str(offset))
+            # print("temp_ino_size "+str(self.inodes[temp_ino].size))
+            # print("old ino size "+str(self.inodes[fh].size))
+            remove = list(set(self.inodes[fh].data) - set(self.inodes[temp_ino].data))
+                    
+            for i in remove:
+                update_index(i.hash, add=False)
+            
+            self.inodes[fh] = self.inodes[temp_ino]        
+            del self.inodes[temp_ino]
+            del self.inodes.pending[temp_ino]
+            # await self.calc_offsets(fh)
+        except:
+            # print(traceback.format_exc)
+            LogEvent("ERROR",traceback.format_exc())
+                        
+
+    '''Change attributes of *inode*
+
+    *fields* will be an `SetattrFields` instance that specifies which
+    attributes are to be updated. *attr* will be an `EntryAttributes`
+    instance for *inode* that contains the new values for changed
+    attributes, and undefined values for all other attributes.
+
+    Most file systems will additionally set the
+    `~EntryAttributes.st_ctime_ns` attribute to the current time (to
+    indicate that the inode metadata was changed).
+
+    If the syscall that is being processed received a file descriptor
+    argument (like e.g. :manpage:`ftruncate(2)` or :manpage:`fchmod(2)`),
+    *fh* will be the file handle returned by the corresponding call to the
+    `open` handler. If the syscall was path based (like
+    e.g. :manpage:`truncate(2)` or :manpage:`chmod(2)`), *fh* will be
+    `None`.
+
+    *ctx* will be a `RequestContext` instance.
+
+    The method should return an `EntryAttributes` instance (containing both
+    the changed and unchanged values).
+    '''
     async def setattr(self, inode, attr, fields, fh, ctx):
 
-        old_inode = self.inodes[inode]
+        old_inode = self.inodes[inode]        
 
-        if fields.update_size:
-            size = 0            
-            for d in old_inode.data:
-                size = size + d.size
-            if size > 0:
-                old_inode.size = size
+        if fields.update_size:            
+            try:
+                # print(self.inodes[inode].size)
+                if old_inode.size < attr.st_size:
+                    await self.write(old_inode.inode, old_inode.size, (bytearray(b'\x00') *(attr.st_size-old_inode.size)))                    
+                elif old_inode.size > attr.st_size:                    
+                    await self.truncate_down(old_inode.inode, attr.st_size)
+                    await self.flush(inode)
+                    old_inode = self.inodes[inode]
+                # old_inode.size = attr.st_size
+                # print(self.inodes[inode].size)
+                # print(old_inode.size)
+            except:
+                print(traceback.format_exc())
+                LogEvent("ERROR",traceback.format_exc())
+           
+        
             
         if fields.update_mode:
             old_inode.mode = attr.st_mode          
@@ -447,7 +542,9 @@ class Operations(pyfuse3.Operations):
         else:
             old_inode.ctime_ns = time.time_ns()
             
-        self.inodes[inode] = old_inode
+        self.inodes[inode] = old_inode        
+        await self.flush(inode)
+        # await self.inodes.commit()
 
         return await self.getattr(inode)
 
@@ -460,22 +557,22 @@ class Operations(pyfuse3.Operations):
         return await self._create(inode_p, name, mode, ctx)
 
 
-    async def statfs(self, ctx):
-        '''
-        unsigned long  f_bsize;    /* Filesystem block size */
-        unsigned long  f_frsize;   /* Fragment size */
-        fsblkcnt_t     f_blocks;   /* Size of fs in f_frsize units */
-        fsblkcnt_t     f_bfree;    /* Number of free blocks */
-        fsblkcnt_t     f_bavail;   /* Number of free blocks for
-                                        unprivileged users */
-        fsfilcnt_t     f_files;    /* Number of inodes */
-        fsfilcnt_t     f_ffree;    /* Number of free inodes */
-        fsfilcnt_t     f_favail;   /* Number of free inodes for
-                                        unprivileged users */
-        unsigned long  f_fsid;     /* Filesystem ID */
-        unsigned long  f_flag;     /* Mount flags */
-        unsigned long  f_namemax;  /* Maximum filename length */
-        '''
+    '''
+    unsigned long  f_bsize;    /* Filesystem block size */
+    unsigned long  f_frsize;   /* Fragment size */
+    fsblkcnt_t     f_blocks;   /* Size of fs in f_frsize units */
+    fsblkcnt_t     f_bfree;    /* Number of free blocks */
+    fsblkcnt_t     f_bavail;   /* Number of free blocks for
+                                    unprivileged users */
+    fsfilcnt_t     f_files;    /* Number of inodes */
+    fsfilcnt_t     f_ffree;    /* Number of free inodes */
+    fsfilcnt_t     f_favail;   /* Number of free inodes for
+                                    unprivileged users */
+    unsigned long  f_fsid;     /* Filesystem ID */
+    unsigned long  f_flag;     /* Mount flags */
+    unsigned long  f_namemax;  /* Maximum filename length */
+    '''
+    async def statfs(self, ctx):      
 
         stat_ = pyfuse3.StatvfsData()
 
@@ -528,7 +625,7 @@ class Operations(pyfuse3.Operations):
             LogEvent(("ERROR",'Attempted to create entry '+ str(name) + 'with unlinked parent '+ str(inode_p)))
             # print('Attempted to create entry '+ str(name) + 'with unlinked parent '+ str(inode_p))
             raise FUSEError(errno.EINVAL)
-
+        
         now_ns = time.time_ns()        
         new_file = File_Inode(self.gen_inode_number())
         new_file.mode = mode
@@ -542,9 +639,10 @@ class Operations(pyfuse3.Operations):
         new_file.parent_inode = inode_p
         if target is not None:
             new_file.target = target
-            st = os.stat(target)
+            # st = os.stat(target)
         
         self.inodes[new_file.inode] = new_file
+        await self.inodes.commit()
 
         return await self.getattr(new_file.inode)
 
@@ -642,7 +740,10 @@ class Operations(pyfuse3.Operations):
         data = await self.retrieve_data(fh, offset, length, whole=False)
         self.stat_msg_queue.put({'INFO:ReadSpeed' : str(len(data)/ (time.time()- start_time))})
 
-        self.inodes[fh].atime_ns = time.time_ns()
+        inode = self.inodes[fh]
+        inode.atime_ns = time.time_ns()
+        self.inodes[fh] = inode
+        await self.inodes.commit()
 
         return data
 
@@ -674,8 +775,7 @@ class Operations(pyfuse3.Operations):
         await trio.sleep(0)
         await self.calc_offsets(fh)
         await trio.sleep(0)
-        await self.inodes.commit()
-        
+        await self.inodes.commit()        
 
         return 0
 
@@ -881,7 +981,7 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
         try:
             if in_index and hash_table[idx].uses - hash_table[idx].uses <= 0:
                 if in_index:
-                    if free_blocks[hash_table[idx].chunk].get(hash_table[idx].size) is not None:
+                    if hash_table[idx].chunk in free_blocks and free_blocks[hash_table[idx].chunk].get(hash_table[idx].size) is not None:
                         free_blocks[hash_table[idx].chunk].get(hash_table[idx].size).append(hash_table[idx].offset)                    
                     else:
                         free_blocks[hash_table[idx].chunk].insert(hash_table[idx].size, [hash_table[idx].offset])                    
@@ -994,7 +1094,7 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                                     written = mm.write(q['compressed_data'])
                                 else:                            
                                     written = mm.write(q['data'])           
-                                
+                                # mm.flush(q['block'], written)
                                 mm.close()
                                 del mm
                             
@@ -1006,9 +1106,10 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                             LogEvent(("ERROR",traceback.format_exc()))                            
                        
                     try:
+                        read_cache[q['hash']] = write_read_cache[q['hash']] #TODO: Check why the cache is invalid wihtout this line
                         del write_read_cache[q['hash']]
                     except KeyError:
-                        continue
+                        pass
 
                     q['result'] = True             
                     b = Block()                           
@@ -1021,8 +1122,8 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                     hash_table[q['hash']] = b
                     update_index(q['hash'], q['chunk'], True, stat_msg_queue)
 
-                    # if len(q['compressed_data']) <= small_block_limit:
-                    #     small_block_read_cache[q['hash']] = q['data']                    
+                    if len(q['compressed_data']) <= small_block_limit:
+                        small_block_read_cache[q['hash']] = q['data']         
 
                     registers_processed = registers_processed + 1
                     if q['compressed']:
@@ -1072,7 +1173,8 @@ async def dedup(data, stat_msg_queue):
             blk_list.append(0)
             if _hashed_data in hash_table:
                 blk_list[len(blk_list)-1] = FileBlock(_hashed_data, hash_table[_hashed_data].size, hash_table[_hashed_data].deflated_size)
-                update_index(_hashed_data)
+                read_cache[_hashed_data] = data
+                update_index(_hashed_data)                
             else:
                 q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': bytearray(data), 'result': False}
                 q['compressed'], q['compressed_data'] = False, q['data'] #await compress_data(q['data'])
@@ -1089,6 +1191,7 @@ async def dedup(data, stat_msg_queue):
 
                 if c.hash in hash_table:
                     blk_list[len(blk_list)-1] = FileBlock(c.hash, hash_table[c.hash].size, hash_table[c.hash].deflated_size)
+                    read_cache[c.hash] = c.data
                     update_index(c.hash)
                 else:
                     q = {'idx':len(blk_list)-1, 'hash':c.hash, 'data': bytearray(c.data), 'result': False}
@@ -1121,7 +1224,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
     for b in blklst[start_block:end_block+1]:
 
         d = seek_in_cache(b.hash)
-        if d is not None:
+        if d is not None:            
             if len(d) != b.raw_size:
                 LogEvent(("DEBUG","Invalid cache entry"))
                 d = None
@@ -1130,21 +1233,20 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                 except:
                     pass
         
-        if d is None and hash_table[b.hash].chunk == -1:
+        if d is None and hash_table[b.hash].chunk == -1:            
             try:
                 d = read_small_block(b.hash, stat_msg_queue)
                 if hash_table[b.hash].compressed:
                         d = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read                    
-                small_block_read_cache[b.hash] = d
+                small_block_read_cache[b.hash] = d                
             except Exception:
                 LogEvent(("ERROR",traceback.format_exc()))
                 raise IOError
    
 
         if d is None:
-            try:
-                d =  single_read(hash_table[b.hash].hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, b.size)
-
+            try:               
+                d =  single_read(hash_table[b.hash].hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, b.size)                
             except KeyError:                
                 d = seek_in_cache(b.hash)
                 if d is not None:
@@ -1152,15 +1254,15 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
                 else: 
                     d =  single_read(hash_table[b.hash].hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, b.size)
 
-        if d is not None and b.hash == hash_data(d):
+        if d is not None and b.hash == hash_data(d):            
             read_cache[b.hash] = d
             data += d
 
         else:
             if d is None:
                 LogEvent(("ERROR",'Block not found!!!'))
-            else:
-                LogEvent(("ERROR",'Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash'))                
+            else:                
+                LogEvent(("ERROR",'Hash of the data at [def get_file_data], from requested location, does not seem to match the requested hash'))
             raise IOError         
         
     return data
@@ -1333,16 +1435,19 @@ if __name__ == '__main__':
         trio.run(par)
     except KeyboardInterrupt:
         pyfuse3.close(unmount=True)
+        RUNNING = False
         LogEvent(("ERROR",traceback.format_exc()))
         print("TODO: REDO THAT FOR MP - Persisting remaining data...")
         os.system("clear")
         # prof.print_stats()
-        stat_sender.join(2)
+        stat_sender.terminate()
+        stat_sender.join(1)
         stat_sender.kill()
     finally:        
-        pyfuse3.close(unmount=True)
-        print("Asking nicely for threads to finish")
-        LogEvent(("INFO","Asking nicely for threads to finish"))
         RUNNING = False
-        stat_sender.join(2)
+        pyfuse3.close(unmount=True)        
+        print("Asking nicely for threads to finish")
+        LogEvent(("INFO","Asking nicely for threads to finish"))        
+        stat_sender.terminate()
+        stat_sender.join(1)
         stat_sender.kill()
