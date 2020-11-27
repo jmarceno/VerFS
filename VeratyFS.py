@@ -17,6 +17,7 @@ VeratyFS File System
 # tracemalloc.start()
 
 import os
+from storage.rocksdb_backend import rocksdb_delete
 import sys
 import multiprocessing as mp
 import random
@@ -29,26 +30,26 @@ import random
 
 import time
 import copy
-import mmap
-from hashing import hashed_chunks, hash_data
-from stats import Timer, humanbytes, memory
-from compression import decompress_data, compress_data
-from BTrees import IOBTree
-from collections import OrderedDict, deque
-import pyfuse3
 import errno
 import stat
+import mmap
+import traceback
+import threading
 from time import time
 import logging
+from collections import OrderedDict, deque
+import pyfuse3
+from BTrees import IOBTree
 from collections import defaultdict
 from pyfuse3 import FUSEError
 from argparse import ArgumentParser
 import trio
-import traceback
 from psutil import virtual_memory
 
-import threading
-
+import mq_client
+from hashing import hashed_chunks, hash_data
+from stats import Timer, humanbytes, memory
+from compression import decompress_data, compress_data
 from logger import LogEvent
 from datastructures import *
 from configurations import *
@@ -56,8 +57,7 @@ from smbs import write_small_block, read_small_block, delete_small_block
 from persistence import init_persistance, persist_data
 from stats import unix_memory, resident, stacksize
 from utils import take_closest
-import mq_client
-
+from storage.storage_backend import commit_data, read_data
 from fsmeta import FSMeta
 # from hashtable import HashTable
 # from keyindex import KeyIndex
@@ -115,13 +115,6 @@ class Operations(pyfuse3.Operations):
         self.services = []
         self.services.append(threading.Thread(target=persist, args=(self.stat_msg_queue,), daemon=True).start())
         self.services.append(threading.Thread(target=usage, args=(self.stat_msg_queue,), daemon=True).start())
-        # self.services[0], self.services[1] = await self.start_services()
-
-    # async def start_services(self):
-    #     a = await trio.to_thread.run_sync(usage, self.stat_msg_queue)
-    #     b = await trio.to_thread.run_sync(persist, self.stat_msg_queue)
-
-    #     return a, b
 
 
     def init_file_system(self):
@@ -922,6 +915,7 @@ def garbage_collector(stat_msg_queue):
     global free_blocks
     global hash_table    
     global fragmentation
+    global datastore
     
     try:        
         while len(GC.add_uses) > 0:
@@ -941,6 +935,11 @@ def garbage_collector(stat_msg_queue):
                         r = delete_small_block(remove, stat_msg_queue)
                         if not r:
                             LogEvent(("ERROR","DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete."))                            
+                    elif backend == 'rocksdb':
+                        datastore[hash_table[remove].chunk].commit_next_write_position = datastore[hash_table[remove].chunk].commit_next_write_position - hash_table[remove].size
+                        rocksdb_delete(remove, datastore[hash_table[remove].chunk])                        
+                        fragmentation['free_size'] = 0
+                        fragmentation['free_count'] = 0
                     else:
                         try:
                             free_blocks[hash_table[remove].chunk].get(hash_table[remove].size).append(hash_table[remove].offset)                    
@@ -1021,19 +1020,6 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
     
     return True
 
-# @profile
-async def update_datastore_info(ds:DataStore):    
-
-    with open(ds.path, "r+b") as f:
-        # mm = mmap.mmap(f.fileno(), length=ds.size, access=mmap.ACCESS_WRITE)        
-        mm = mmap.mmap(f.fileno(), length=64, access=mmap.ACCESS_WRITE)
-        n = (ds.next_write_position).to_bytes(64, byteorder='little')
-        # mm.seek(0)
-        mm.write(n)        
-        mm.close()
-        # del mm
-    
-    return 0
 
 # @profile
 async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
@@ -1046,7 +1032,8 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
     global chunk_size
     global datastore
     global free_blocks    
-    global hash_table    
+    global hash_table
+    global fragmentation
         
     registers_processed = 0
     bytes_processed = 0
@@ -1069,48 +1056,9 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                             written = write_small_block(q['hash'], bytearray(q['data']), stat_msg_queue)
                         if random.randrange(0,10) == 0:
                             stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})    
-                    else:
-                        for idx, ds in enumerate(datastore):
-                            if not ds.IS_FULL and not ds.LOCKED:
-                                q['block'] = ds.next_write_position
-                                if q['compressed']:
-                                    ds.next_write_position = ds.next_write_position + len(q['compressed_data'])
-                                else:
-                                    ds.next_write_position = ds.next_write_position + len(q['data'])
-                                q['chunk'] = ds.chunk
-                                if ds.next_write_position + (mean_blk_size*10) > ds.size:
-                                    ds.IS_FULL = True                                
-                                break
-                            elif idx != len(datastore)-1:
-                                continue
-                            else:
-                                for ds, fb in enumerate(free_blocks):
-                                    try:                                    
-                                        s = fb.minKey(len(q['compressed_data']))
-                                        q['block'] = fb.get(s).pop(0)
-                                        q['chunk'] = ds
-                                        if len(fb.get(s)) == 0:
-                                            fb.pop(s)
-                                            fragmentation['free_size'] = fragmentation['free_size'] - s
-                                            fragmentation['free_count'] = fragmentation['free_count'] - 1                                   
-                                        break
-                                    except ValueError:
-                                        if ds == len(free_blocks) - 1:
-                                            LogEvent(("INFO","Partition FULL. No free blocks that can fit the data."))                                            
-                                            raise FUSEError(errno.ENOSPC)                                        
-                                        else:
-                                            continue                    
-                        try:
-                            with open(datastore[q['chunk']].path, "r+b") as f:
-                                mm = mmap.mmap(f.fileno(), length=datastore[q['chunk']].size, access=mmap.ACCESS_WRITE)
-                                mm.seek(q['block'])
-                                if q['compressed']:
-                                    written = mm.write(q['compressed_data'])
-                                else:                            
-                                    written = mm.write(q['data'])           
-                                # mm.flush(q['block'], written)
-                                mm.close()
-                                del mm
+                    else:                        
+                        try:                            
+                            written, q, datastore, free_blocks, fragmentation = await commit_data(q,datastore, free_blocks, fragmentation)
                             
                             if random.randrange(0,10) == 0:
                                 stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})
@@ -1160,9 +1108,10 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
         except IndexError:
             writing = False
     
-    for ds in datastore:
-        await trio.sleep(0)
-        await update_datastore_info(ds)
+    if backend == 'mmap':
+        for ds in datastore:
+            await trio.sleep(0)
+            ds.commit_next_write_position()
 
     await trio.sleep(0)
     hash_table.commit()
@@ -1257,17 +1206,17 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
             except Exception:
                 LogEvent(("ERROR",traceback.format_exc()))
                 raise IOError
-   
 
         if d is None:
-            try:               
-                d =  single_read(hash_table[b.hash].hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, b.size)                
+            try:
+                d = read_data(hash_table[b.hash].hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk], b.size, hash_table)
+                
             except KeyError:                
                 d = seek_in_cache(b.hash)
                 if d is not None:
                     break
                 else: 
-                    d =  single_read(hash_table[b.hash].hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk].path, b.size)
+                    d = read_data(hash_table[b.hash].hash, hash_table[b.hash].offset, datastore[hash_table[b.hash].chunk], b.size, hash_table)
 
         if d is not None and b.hash == hash_data(d):            
             read_cache[b.hash] = d
@@ -1281,27 +1230,6 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
             raise IOError         
         
     return data
-
-
-def single_read(_hash, _block, ds_path, read_size):
-    try:
-        if os.path.isfile(ds_path):
-            with open(ds_path, "r+b") as f:
-                mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_READ)
-                mm.seek(_block)
-                r = mm.read(read_size)            
-                mm.close()                                
-            d = r[:read_size]                    
-            if hash_table[_hash].compressed:
-                decompresed_data = decompress_data(d)   # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
-            else:
-                decompresed_data = d
-            
-            d = decompresed_data
-
-            return d
-    except:
-        return None
 
 
 def seek_in_cache(_blk_hash):    

@@ -28,3 +28,9 @@ q_random : 2 # Maximum number of the random range to the tested against to decid
 web_interface : 'localhost:5555'
 
 log_file : /home/jmarceno/metadata/logs.txt
+
+# Storage Backend for data persistance
+# Options:
+# 'mmap': Data will be stored into chunks and persisted through a mmap interface -> Fast, fragmentation prone
+# 'rocksdb': (*RECOMMENDED*) Data will be stored into various rocksdb databases -> Not as fast as mmap but *safer* and does not suffer from fragmention
+backend: 'rocksdb'

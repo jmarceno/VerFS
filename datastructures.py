@@ -1,7 +1,9 @@
 from collections import deque
+from logger import LogEvent
 import time
 from compression import compress_data
-
+import mmap
+import traceback
 
 class Garbage_Collector:
     def __init__(self):
@@ -10,17 +12,33 @@ class Garbage_Collector:
 
 
 class DataStore:
-    def __init__(self, _chunk, _chunk_size, _path, _next_write_position=65):
+    def __init__(self, _chunk, _chunk_size, _path, _next_write_position=65, db=None):
         self.chunk = _chunk
         self.size = _chunk_size
         self.path = _path
         self.next_write_position = _next_write_position
         self.LOCKED = False
+        self.db = db
 
-        if self.next_write_position + ((64*1024)*10) > self.size:
+        if self.next_write_position + (1024*1024) > self.size:
             self.IS_FULL = True
         else:
             self.IS_FULL = False
+
+    
+    def commit_next_write_position(self):
+        with open(self.path, "r+b") as f:
+            try:
+                mm = mmap.mmap(f.fileno(), length=64, access=mmap.ACCESS_WRITE)
+                n = (self.next_write_position).to_bytes(64, byteorder='little')            
+                mm.write(n)        
+                mm.close()
+            except:
+                LogEvent(("ERROR", traceback.format_exc()))
+                raise IOError
+        
+        return True
+
 
 
 class QueuedWrite:

@@ -52,4 +52,6 @@ datastore_chunks = list(range(0, datastore_chunks_number))
 
 identity_string = confs['identity_string']
 
+backend = confs['backend']
+
 q_random = confs['q_random'] # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue

@@ -1,0 +1,73 @@
+import rocksdb
+import traceback
+import os
+import errno
+from BTrees import IOBTree
+from pyfuse3 import FUSEError
+
+from logger import LogEvent
+from datastructures import QueuedWrite, DataStore
+from hashtable import HashTable
+from compression import decompress_data
+from utils import load_configuration, datastore_opt, get_dir_size
+
+confs = load_configuration()
+
+#TODO: Check database size and limit writes when it reaches it's maximum size
+
+async def rocksdb_commit(q:QueuedWrite, datastore:list, free_blocks:IOBTree, fragmentation:dict):
+    
+    written = 0
+    nw = 0
+
+    if q['compressed']:
+        data = q['compressed_data']
+        written = len(q['compressed_data'])
+    else:
+        data = q['data']
+        written = len(q['data'])
+    
+    try:
+        for idx, ds in enumerate(datastore):
+            if ds.next_write_position + (1024*1024) < ds.size:
+                nw = ds.next_write_position + written
+                ds.next_write_position = nw
+                q['chunk'] = ds.chunk
+                q['block'] = nw
+                # db = rocksdb.DB(ds.path, datastore_opt())
+                ds.db.put(q['hash'].encode(), bytes(data))
+                nw = nw + written
+                nw = (nw).to_bytes(64, byteorder='little')                
+                ds.db.put('next_write_position'.encode(), nw)
+                break
+            elif idx == len(datastore)-1:
+                raise FUSEError(errno.ENOSPC)            
+    except:
+        LogEvent(("ERROR",traceback.format_exc()))          
+    
+    return written, q, datastore, free_blocks, fragmentation
+
+
+def rocksdb_read(_hash:str, _block:int, datastore:DataStore, read_size:int, hash_table:HashTable):
+    # db = rocksdb.DB(datastore.path, datastore_opt())
+    
+    try:
+        data = datastore.db.get(_hash.encode())
+        
+        if hash_table[_hash].compressed:
+            return decompress_data(data)
+                # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
+        else:
+            return data        
+    except:
+        LogEvent(("ERROR",traceback.format_exc()))
+        return bytes(0)
+
+
+def rocksdb_delete(_hash:str, datastore:str):
+    # db = rocksdb.DB(datastore.path, datastore_opt())
+    try:
+        datastore.db.delete(_hash.encode())
+    except:
+        LogEvent(("ERROR",traceback.format_exc()))
+        

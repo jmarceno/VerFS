@@ -35,3 +35,6 @@ psutil
 python-decouple
 zmq
 pyyaml
+black
+pylint
+wheel
