@@ -15,6 +15,7 @@ class DataStore:
         self.size = _chunk_size
         self.path = _path
         self.next_write_position = _next_write_position
+        self.LOCKED = False
 
         if self.next_write_position + ((64*1024)*10) > self.size:
             self.IS_FULL = True

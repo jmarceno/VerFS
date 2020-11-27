@@ -20,12 +20,12 @@ import os
 import sys
 import multiprocessing as mp
 import random
-# If we are running from the pyfuse3 source directory, try
-# to load the module from there first.
-basedir = os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), '..'))
-if (os.path.exists(os.path.join(basedir, 'setup.py')) and
-    os.path.exists(os.path.join(basedir, 'src', 'pyfuse3.pyx'))):
-    sys.path.insert(0, os.path.join(basedir, 'src'))
+# # If we are running from the pyfuse3 source directory, try
+# # to load the module from there first.
+# basedir = os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), '..'))
+# if (os.path.exists(os.path.join(basedir, 'setup.py')) and
+#     os.path.exists(os.path.join(basedir, 'src', 'pyfuse3.pyx'))):
+#     sys.path.insert(0, os.path.join(basedir, 'src'))
 
 import time
 import copy
@@ -709,7 +709,7 @@ class Operations(pyfuse3.Operations):
                     return start_diff, start_blk, end_blk, data
             else:
                 data = get_file_data(self.stat_msg_queue, self.inodes[fh].data, start_blk, end_blk)
-                backupdata = data
+                backupdata = data # TODO: REMOVE for production
 
                 if whole:
                     if start_diff < 0:
@@ -778,11 +778,11 @@ class Operations(pyfuse3.Operations):
         has been duplicated).
         '''
 
-        # await write_new_blocks(write_buffer, resq, self.stat_msg_queue)
-        # await trio.sleep(0)
+        await write_new_blocks(write_buffer, resq, self.stat_msg_queue)
+        await trio.sleep(0)
         # await self.calc_offsets(fh)
         # await trio.sleep(0)
-        # await self.inodes.commit()        
+        await self.inodes.commit()        
 
         return 0
 
@@ -864,7 +864,7 @@ class Operations(pyfuse3.Operations):
 
         f.mtime_ns = time.time_ns()
         
-        del self.inodes[fh]
+        # del self.inodes[fh]
         self.inodes[fh] = f
         await self.inodes.commit()
         
@@ -1017,6 +1017,8 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
             LogEvent(("ERROR",traceback.format_exc()))            
             raise IOError
 
+    hash_table.commit()
+    
     return True
 
 # @profile
@@ -1069,7 +1071,7 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                             stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})    
                     else:
                         for idx, ds in enumerate(datastore):
-                            if not ds.IS_FULL:
+                            if not ds.IS_FULL and not ds.LOCKED:
                                 q['block'] = ds.next_write_position
                                 if q['compressed']:
                                     ds.next_write_position = ds.next_write_position + len(q['compressed_data'])
@@ -1084,8 +1086,9 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                             else:
                                 for ds, fb in enumerate(free_blocks):
                                     try:                                    
-                                        s = fb.minKey(len(q.compressed_data))
+                                        s = fb.minKey(len(q['compressed_data']))
                                         q['block'] = fb.get(s).pop(0)
+                                        q['chunk'] = ds
                                         if len(fb.get(s)) == 0:
                                             fb.pop(s)
                                             fragmentation['free_size'] = fragmentation['free_size'] - s
@@ -1094,7 +1097,7 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                                     except ValueError:
                                         if ds == len(free_blocks) - 1:
                                             LogEvent(("INFO","Partition FULL. No free blocks that can fit the data."))                                            
-                                            raise IOError
+                                            raise FUSEError(errno.ENOSPC)                                        
                                         else:
                                             continue                    
                         try:
@@ -1113,8 +1116,9 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                                 stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})
                             
                         except:
-                            stat_msg_queue.put_nowait({'DEBUG' : "Error writing data to disk"})
-                            LogEvent(("ERROR",traceback.format_exc()))                            
+                            stat_msg_queue.put_nowait({'DEBUG' : "Error writing data to disk"})                            
+                            LogEvent(("ERROR",traceback.format_exc()))
+                            raise FUSEError(errno.EIO)   
                        
                     try:
                         read_cache[q['hash']] = write_read_cache[q['hash']] #TODO: Check why the cache is invalid wihtout this line

@@ -32,10 +32,9 @@ class FSMeta(MutableMapping):
         return self.d[k]
 
     def __delitem__(self, k):
-        if self.remove_from_disk(k):            
-            
-            # if k in self.pending:
-            #     del self.pending[k]
+        if self.remove_from_disk(k): 
+            if k in self.pending:
+                del self.pending[k]
             del self.d[k]
         else:
             t = traceback.format_exc()
@@ -43,15 +42,15 @@ class FSMeta(MutableMapping):
             print("not removed from disk")            
             
     def __setitem__(self, k, v:File_Inode):
-        if self.save_to_disk(k, v):
-            self.d[k] = v
-        # self.pending[k] = v
+        # if self.save_to_disk(k, v):
+        self.d[k] = v
+        self.pending[k] = v
 
-    async def commit(self):
-        pass
-        # cp = self.pending.copy()
-        # self.pending = {}              
-        # self.save_to_disk(cp)
+    async def commit(self):        
+        cp = self.pending.copy()
+        self.pending = {}              
+        self.batch_save_to_disk(cp)
+        del cp
 
     def decrease_st_nlink(self, k):
         self.d[k].st_nlink = self.d[k].st_nlink - 1
