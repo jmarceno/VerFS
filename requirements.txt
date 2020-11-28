@@ -38,3 +38,4 @@ pyyaml
 black
 pylint
 wheel
+pytest
