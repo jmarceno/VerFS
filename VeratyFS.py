@@ -205,7 +205,7 @@ class Operations(pyfuse3.Operations):
     async def readdir(self, inode, off, token):
         dir_entries = []
         [dir_entries.append(self.inodes[x]) for y,x in enumerate(self.inodes, off) if self.inodes[x].parent_inode==inode and self.inodes[x].list_on_dir_lookup]
-        # dir_entries = self.inodes.get_dir(inode)
+        
         try:
             pyfuse3.readdir_reply(token, dir_entries[off].name, await self.getattr(dir_entries[off].inode), off+1)
             
@@ -214,8 +214,8 @@ class Operations(pyfuse3.Operations):
 
 
     async def unlink(self, inode_p, name, ctx):
-        # print("unlink entry")
-        # await self.lock.acquire()
+        
+        
         entry = await self.lookup(inode_p, name)
         
         if stat.S_ISDIR(entry.st_mode):
@@ -232,16 +232,12 @@ class Operations(pyfuse3.Operations):
         #     self._remove(inode_p, name, await self.getattr(i.inode, ctx))
 
         await self.inodes.commit()
-        
-        
-        # self.lock.release()
-        
+                
 
     async def forget(self, inode_list):
         '''Decrease lookup counts for inodes in *inode_list*
         *inode_list* is a list of ``(inode, nlookup)`` '''
         
-        # await self.lock.acquire()
         
         for n in inode_list:
             try:
@@ -274,13 +270,6 @@ class Operations(pyfuse3.Operations):
             if self.inodes[i].parent_inode == entry.st_ino and self.inodes[i].list_on_dir_lookup == True:
                 raise FUSEError(errno.ENOTEMPTY)       
         
-        # i = self.inodes[entry.st_ino]
-        # i.st_nlink = i.st_nlink - 1
-        # i.lookup_count = i.lookup_count - 1
-        # self.inodes[entry.st_ino] = i
-        # self.inodes[entry.st_ino].list_on_dir_lookup = False
-
-        # if self.inodes[entry.st_ino].st_nlink == 0:
         pyfuse3.invalidate_entry_async(self.inodes[entry.st_ino].parent_inode, self.inodes[entry.st_ino].name, deleted=0, ignore_enoent=True)
         del self.inodes[entry.st_ino]        
 
@@ -302,14 +291,9 @@ class Operations(pyfuse3.Operations):
                     break
                 except KeyError:
                     LogEvent(("ERROR",traceback.format_exc()))
-                    pass
-                    # print(traceback.format_exc())
-                    # print("Key already removed? Index Inconsistance at self.inodes")
 
 
     async def symlink(self, inode_p, name, target, ctx):
-        # await self.lock.acquire()
-
         mode = (stat.S_IFLNK | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
                 stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
                 stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH)
@@ -321,7 +305,6 @@ class Operations(pyfuse3.Operations):
         self.inodes[entry.st_ino] = i
 
         await self.inodes.commit()        
-        # self.lock.release()
 
         return entry
 
@@ -415,8 +398,6 @@ class Operations(pyfuse3.Operations):
 
 
     async def link(self, inode, new_inode_p, new_name, ctx):
-        # await self.lock.acquire()
-
         entry_p = await self.getattr(new_inode_p)
         if entry_p.st_nlink == 0:
             LogEvent(("ERROR",'Attempted to create entry '+ str(new_name) + 'with unlinked parent '+ str(new_inode_p)))
@@ -435,8 +416,6 @@ class Operations(pyfuse3.Operations):
         self.inodes[inode] = i
         
         await self.inodes.commit()
-
-        # self.lock.release()
 
         return await self.getattr(inode)
         
@@ -477,7 +456,6 @@ class Operations(pyfuse3.Operations):
             
             self.inodes[fh] = self.inodes[temp_ino]        
             del self.inodes[temp_ino]
-            # del self.inodes.pending[temp_ino]
 
         except:
             print(traceback.format_exc)
@@ -513,12 +491,10 @@ class Operations(pyfuse3.Operations):
 
         if fields.update_size:            
             try:
-                # print(self.inodes[inode].size)
                 if old_inode.size < attr.st_size:
                     await self.write(old_inode.inode, old_inode.size, (bytearray(b'\x00') *(attr.st_size-old_inode.size)))
                 elif old_inode.size > attr.st_size:                    
                     await self.truncate_down(old_inode.inode, attr.st_size)
-                    # await self.flush(inode)
                 old_inode = self.inodes[inode]                
             except:
                 print(traceback.format_exc())
@@ -546,8 +522,6 @@ class Operations(pyfuse3.Operations):
             old_inode.ctime_ns = time.time_ns()
             
         self.inodes[inode] = old_inode        
-        # await self.flush(inode)
-        # await self.inodes.commit()
 
         return await self.getattr(inode)
 
@@ -626,7 +600,6 @@ class Operations(pyfuse3.Operations):
 
         if (await self.getattr(inode_p)).st_nlink == 0:
             LogEvent(("ERROR",'Attempted to create entry '+ str(name) + 'with unlinked parent '+ str(inode_p)))
-            # print('Attempted to create entry '+ str(name) + 'with unlinked parent '+ str(inode_p))
             raise FUSEError(errno.EINVAL)
         
         now_ns = time.time_ns()        
@@ -642,7 +615,6 @@ class Operations(pyfuse3.Operations):
         new_file.parent_inode = inode_p
         if target is not None:
             new_file.target = target
-            # st = os.stat(target)
         
         self.inodes[new_file.inode] = new_file
         await self.inodes.commit()
@@ -777,13 +749,6 @@ class Operations(pyfuse3.Operations):
         if threading.active_count() <= max_write_workers:
             threading.Thread(target=write_new_blocks, args=(write_buffer, resq, self.stat_msg_queue,)).start()
             await self.inodes.commit()
-        # else:
-        #     if not self.locked:
-        #         self.locked = True
-        #         await trio.sleep(2)
-        #         if len(write_buffer) > 0:
-        #             threading.Thread(target=write_new_blocks, args=(write_buffer, resq, self.stat_msg_queue,)).start()
-        #         self.locked = False
         
         return 0
 
@@ -859,15 +824,10 @@ class Operations(pyfuse3.Operations):
             data += await dedup(buf, self.stat_msg_queue)
             f.data = data            
 
-        # await write_new_blocks(write_buffer, resq, self.stat_msg_queue)
-
         f.size = max(f.size, offset+len(buf))
 
         f.mtime_ns = time.time_ns()
-        
-        # del self.inodes[fh]
         self.inodes[fh] = f
-        # await self.inodes.commit()
         
         return len(buf)
 
@@ -1031,12 +991,12 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
 
 # @profile
 def write_new_blocks(_queued_writes, resq, stat_msg_queue):
-    """
+    '''
     Writes a series of blocks that where quede
 
     :param _queued_writes: data to be written
     :return: Tuple with the result of the operation and position (block) that the data has been written to
-    """    
+    '''
     global chunk_size
     global datastore
     global free_blocks    
@@ -1112,10 +1072,8 @@ def write_new_blocks(_queued_writes, resq, stat_msg_queue):
     
     if backend == 'mmap':
         for ds in datastore:
-            # await trio.sleep(0)
             ds.commit_next_write_position()
 
-    # await trio.sleep(0)
     hash_table.commit()
 
 
@@ -1131,7 +1089,6 @@ async def dedup(data, stat_msg_queue):
     start_time = time.time()
     bytes_processed = 0
 
-    # if type(data) == bytearray or type(data) == bytes or type(data) == memoryview:
     if type(data) != memoryview:
         data = memoryview(data)
         

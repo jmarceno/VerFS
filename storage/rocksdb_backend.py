@@ -39,21 +39,18 @@ def rocksdb_commit(q:QueuedWrite, datastore:list, free_blocks:IOBTree, fragmenta
     
     try:
         for idx, ds in enumerate(datastore):
-            if ds.next_write_position + (1024*1024) < ds.size:
-                # await trio.sleep(0)
-                nw = ds.next_write_position + written
-                ds.next_write_position = nw
+            ds.next_write_position = get_dir_size(ds.path)
+            
+            if ds.next_write_position < ds.size:                
                 q['chunk'] = ds.chunk
-                q['block'] = nw
-                # db = rocksdb.DB(ds.path, datastore_opt())
-                ds.db.put(q['hash'].encode(), bytes(data))
-                nw = nw + written
-                nw = (nw).to_bytes(64, byteorder='little')                
-                ds.db.put('next_write_position'.encode(), nw)
+                q['block'] = ds.next_write_position          
+                ds.db.put(q['hash'].encode(), bytes(data))                
                 break
             elif idx == len(datastore)-1:
+                print(ds.next_write_position)
                 raise FUSEError(errno.ENOSPC)            
     except:
+        print(ds.next_write_position)
         raise FUSEError(errno.ENOSPC)
     
     return written, q, datastore, free_blocks, fragmentation

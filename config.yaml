@@ -1,8 +1,8 @@
 gc_interval : 20  # Intervalo entre o final de uma operação de GC e o inicio de outra
 usage_interval : 5 # Time in seconds to update the usage couters
 
-cache_size : 10000  # Cache size in entries. Memory size is ~cache_size*allocation_unit
-small_block_cache_size : 10000
+cache_size : 1000  # Cache size in entries. Memory size is ~cache_size*allocation_unit
+small_block_cache_size : 1000
 
 allocation_unit : 1024
 
@@ -11,8 +11,18 @@ mean_blk_size : 128
 #max_blk_size : 512 # Auto calculated by the system
 small_block_limit : 32 #4096  # Blocos com tamanho igual ou menor que este não serão compactados e serão armazenados em um local diferente especificado em small_block_path
 
-partition_size : 6  # Partion size in GB
-chunk_size_per_GB : 2 # Tamanho de cada um dos chunks TODO: How does this handles fractions?
+partition_size : 5  # Partion size in GB
+chunk_size_per_GB : 1 # Tamanho de cada um dos chunks TODO: How does this handles fractions?
+
+# Location where the data will be stored
+# fs_meta_path, hash_table_path, free_blocks_path en gc_path are all metadata
+# small_blocks_db_path and datastore_base_path are block store locations
+# MMAP backend use all the stores
+# RocksDB backend, use only fs_meta_path, hash_table_path and datastore_base_path
+
+# datastore_base_path and small_block_db_path can be a list with multiply locations
+# the system will spreads the reads and writes between this locations to improve
+# safety and performance
 
 fs_meta_path : '/home/jmarceno/metadata/filesystem'
 hash_table_path : '/home/jmarceno/metadata/hashtable'
@@ -21,6 +31,7 @@ gc_path : '/home/jmarceno/metadata/gc'
 small_block_db_path : '/home/jmarceno/metadata/smbs'
 datastore_base_path : '/home/jmarceno/metadata/'
 
+# Used on the datastore to ini
 identity_string : 'VeratyFS@v0.0.1@InLineDedup,FixedStoreSize,GC,Compression,FixedBlockSize\n'
 
 q_random : 2 # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue
@@ -38,4 +49,4 @@ backend: 'rocksdb'
 # Maximum number of write worker threads, responsible to flush data to disk
 # Increase this number in line with the number of cores and disks that the system has access to
 # More disks == More write workers (1-5 per disk is recommended)
-max_write_workers: 30
+max_write_workers: 11
