@@ -3,6 +3,7 @@ from pathlib import Path
 import rocksdb
 import yaml
 import traceback
+import os
 
 def take_closest(ordList, myNumber, left=True):
     """
@@ -31,7 +32,8 @@ def take_closest(ordList, myNumber, left=True):
 
 def load_configuration():
     try:
-        with open("config.yaml", 'r') as stream:        
+        config_path = os.path.join(os.getcwd(), 'config.yaml')
+        with open(config_path, 'r') as stream:
             return yaml.safe_load(stream)
     except:
         print("Could not load configurations. Please check 'config.yaml' to ensure it has the proper configurations.")
