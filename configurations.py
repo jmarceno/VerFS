@@ -29,10 +29,10 @@ small_block_read_cache =LRU(maxlen=confs['small_block_cache_size'])
 
 allocation_unit = confs['allocation_unit']
 
-mean_blk_size = allocation_unit*confs['allocation_unit']
+mean_blk_size = allocation_unit*confs['mean_blk_size']
 min_blk_size = mean_blk_size//4
 max_blk_size = mean_blk_size * 8
-small_block_limit = confs['small_block_limit']    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
+small_block_limit = allocation_unit*confs['small_block_limit']    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
 partition_size = confs['partition_size']  # Partion size in GB
 partition_size_gb = partition_size * 1073741824
@@ -53,5 +53,7 @@ datastore_chunks = list(range(0, datastore_chunks_number))
 identity_string = confs['identity_string']
 
 backend = confs['backend']
+
+max_write_workers = confs['max_write_workers'] + 9 # 9 is the number of threads that are constantly running without consider the write threads
 
 q_random = confs['q_random'] # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue

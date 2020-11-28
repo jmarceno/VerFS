@@ -23,17 +23,18 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
     if os.path.isfile(gc_path):
         GC = decompress_pickle(gc_path)
     
-    if os.path.isfile(free_blocks_path):
-        free_blocks = decompress_pickle(free_blocks_path)
-        print("Recalculating fragmentation:")
-        # free_blocks_path = _free_blocks
+    if confs['backend'] == 'mmap':
+        if os.path.isfile(free_blocks_path):
+            free_blocks = decompress_pickle(free_blocks_path)
+            print("Recalculating fragmentation:")
+            # free_blocks_path = _free_blocks
+            
+            for fb in free_blocks:
+                if len(list(fb.keys())) > 0: 
+                    for b in list(fb.keys()):
+                        fragmentation['free_size'] = fragmentation['free_size'] + (len(fb.get(b)) * b)
+                        fragmentation['free_count'] = fragmentation['free_count'] + len(fb.get(b))
         
-        for fb in free_blocks:
-            if len(list(fb.keys())) > 0: 
-                for b in list(fb.keys()):
-                    fragmentation['free_size'] = fragmentation['free_size'] + (len(fb.get(b)) * b)
-                    fragmentation['free_count'] = fragmentation['free_count'] + len(fb.get(b))
-    
     if confs['backend'] == 'mmap':
         chunk_msg = False
         for chunk in datastore_chunks:

@@ -104,14 +104,16 @@ class Operations(pyfuse3.Operations):
     def __init__(self, stat_msg_queue):
         super(Operations, self).__init__()
         
-        self.lock = trio.Lock()
+        self.locked = False  # Write lock to prevent to many write threads to wait in line
+        
         self.inode_open_count = defaultdict(int)
         self.stat_msg_queue = stat_msg_queue        
         self.inodes = FSMeta()
-        
+                
         if len(self.inodes) == 0:
             self.init_file_system()
 
+        
         self.services = []
         self.services.append(threading.Thread(target=persist, args=(self.stat_msg_queue,), daemon=True).start())
         self.services.append(threading.Thread(target=usage, args=(self.stat_msg_queue,), daemon=True).start())
@@ -404,7 +406,7 @@ class Operations(pyfuse3.Operations):
         # inode_moved.parent_inode = inode_p_new
         # del self.inodes[inode_moved.inode]
         # self.inodes[inode_moved.inode] = inode_moved        
-
+        self.inodes.commit()
         return True
         
 
@@ -471,6 +473,7 @@ class Operations(pyfuse3.Operations):
                     
             for i in remove:
                 update_index(i.hash, add=False)
+                
             
             self.inodes[fh] = self.inodes[temp_ino]        
             del self.inodes[temp_ino]
@@ -743,7 +746,7 @@ class Operations(pyfuse3.Operations):
         inode = self.inodes[fh]
         inode.atime_ns = time.time_ns()
         self.inodes[fh] = inode
-        await self.inodes.commit()
+        # await self.inodes.commit()
 
         return data
 
@@ -771,12 +774,17 @@ class Operations(pyfuse3.Operations):
         has been duplicated).
         '''
 
-        await write_new_blocks(write_buffer, resq, self.stat_msg_queue)
-        await trio.sleep(0)
-        # await self.calc_offsets(fh)
-        # await trio.sleep(0)
-        await self.inodes.commit()        
-
+        if threading.active_count() <= max_write_workers:
+            threading.Thread(target=write_new_blocks, args=(write_buffer, resq, self.stat_msg_queue,)).start()
+            await self.inodes.commit()
+        # else:
+        #     if not self.locked:
+        #         self.locked = True
+        #         await trio.sleep(2)
+        #         if len(write_buffer) > 0:
+        #             threading.Thread(target=write_new_blocks, args=(write_buffer, resq, self.stat_msg_queue,)).start()
+        #         self.locked = False
+        
         return 0
 
 
@@ -810,7 +818,7 @@ class Operations(pyfuse3.Operations):
         blks = [0]                
         [blks.append(x.raw_size+blks[len(blks)-1]) for x in self.inodes[fh].data]
         blks.pop(0)
-        i = copy.copy(self.inodes[fh])
+        i = self.inodes[fh]
         i.offsets = blks
         del self.inodes[fh]
         self.inodes[fh] = i
@@ -819,7 +827,7 @@ class Operations(pyfuse3.Operations):
 
     # @profile
     async def write(self, fh, offset, buf):
-        f = copy.copy(self.inodes[fh])
+        f = self.inodes[fh]
         
         end_offset = offset + len(buf)            
         
@@ -851,7 +859,7 @@ class Operations(pyfuse3.Operations):
             data += await dedup(buf, self.stat_msg_queue)
             f.data = data            
 
-        await write_new_blocks(write_buffer, resq, self.stat_msg_queue)
+        # await write_new_blocks(write_buffer, resq, self.stat_msg_queue)
 
         f.size = max(f.size, offset+len(buf))
 
@@ -859,7 +867,7 @@ class Operations(pyfuse3.Operations):
         
         # del self.inodes[fh]
         self.inodes[fh] = f
-        await self.inodes.commit()
+        # await self.inodes.commit()
         
         return len(buf)
 
@@ -1022,7 +1030,7 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
 
 
 # @profile
-async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
+def write_new_blocks(_queued_writes, resq, stat_msg_queue):
     """
     Writes a series of blocks that where quede
 
@@ -1042,80 +1050,75 @@ async def write_new_blocks(_queued_writes, resq, stat_msg_queue):
     
     while writing:
         try:            
-            q = _queued_writes.popleft()
-            if not q['result'] and q['hash'] not in hash_table:
-                try:
-                    if len(q['compressed_data']) <= small_block_limit:
-                        if q['compressed']:                            
-                            q['chunk'] = -1
-                            q['block'] = -1
-                            written = write_small_block(q['hash'], bytearray(q['compressed_data']), stat_msg_queue)                            
-                        else:                            
-                            q['chunk'] = -1
-                            q['block'] = -1
-                            written = write_small_block(q['hash'], bytearray(q['data']), stat_msg_queue)
+            q = _queued_writes.popleft()        
+            try:
+                if backend != 'rocksdb' and len(q['compressed_data']) <= small_block_limit:
+                    if q['compressed']:                            
+                        q['chunk'] = -1
+                        q['block'] = -1
+                        written = write_small_block(q['hash'], q['compressed_data'], stat_msg_queue)                            
+                    else:                            
+                        q['chunk'] = -1
+                        q['block'] = -1
+                        written = write_small_block(q['hash'], q['data'], stat_msg_queue)
+                    if random.randrange(0,10) == 0:
+                        stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})    
+                else:                        
+                    try:                            
+                        written, q, datastore, free_blocks, fragmentation = commit_data(q,datastore, free_blocks, fragmentation)
+                        
                         if random.randrange(0,10) == 0:
-                            stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})    
-                    else:                        
-                        try:                            
-                            written, q, datastore, free_blocks, fragmentation = await commit_data(q,datastore, free_blocks, fragmentation)
-                            
-                            if random.randrange(0,10) == 0:
-                                stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})
-                            
-                        except:
-                            stat_msg_queue.put_nowait({'DEBUG' : "Error writing data to disk"})                            
-                            LogEvent(("ERROR",traceback.format_exc()))
-                            raise FUSEError(errno.EIO)   
-                       
-                    try:
-                        read_cache[q['hash']] = write_read_cache[q['hash']] #TODO: Check why the cache is invalid wihtout this line
-                        del write_read_cache[q['hash']]
-                    except KeyError:
-                        pass
+                            stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})
+                        
+                    except:
+                        stat_msg_queue.put_nowait({'DEBUG' : "Error writing data to disk"})                            
+                        LogEvent(("ERROR",traceback.format_exc()))
+                        raise FUSEError(errno.EIO)   
+                    
+                try:
+                    read_cache[q['hash']] = write_read_cache[q['hash']] #TODO: Check why the cache is invalid wihtout this line
+                    del write_read_cache[q['hash']]
+                except KeyError:
+                    pass
 
-                    q['result'] = True             
-                    b = Block()                           
-                    b.hash = q['hash']
-                    b.chunk = q['chunk']
-                    b.offset = q['block']
-                    b.size = len(q['compressed_data'])
-                    b.deflated_size = len(q['data'])
-                    b.compressed = q['compressed']
-                    hash_table[q['hash']] = b
-                    update_index(q['hash'], q['chunk'], True, stat_msg_queue)
+                q['result'] = True             
+                b = Block()
+                b.hash = q['hash']
+                b.chunk = q['chunk']
+                b.offset = q['block']
+                b.size = len(q['compressed_data'])
+                b.deflated_size = len(q['data'])
+                b.compressed = q['compressed']
+                hash_table[q['hash']] = b
+                update_index(q['hash'], q['chunk'], True, stat_msg_queue)
 
-                    if len(q['compressed_data']) <= small_block_limit:
-                        small_block_read_cache[q['hash']] = q['data']         
+                if len(q['compressed_data']) <= small_block_limit:
+                    small_block_read_cache[q['hash']] = q['data']         
 
-                    registers_processed = registers_processed + 1
-                    if q['compressed']:
-                        bytes_processed = bytes_processed + len(q['compressed_data'])
-                    else:
-                        bytes_processed = bytes_processed + len(q['data'])      
-                    continue                    
-
-                except Exception:
-                    LogEvent(("ERROR",traceback.format_exc()))
-            else:                
-                registers_processed = registers_processed + 1                
+                registers_processed = registers_processed + 1
                 if q['compressed']:
                     bytes_processed = bytes_processed + len(q['compressed_data'])
                 else:
-                    bytes_processed = bytes_processed + len(q['data'])
-            del q
+                    bytes_processed = bytes_processed + len(q['data'])      
+                continue                    
+
+            except KeyError:
+                raise FUSEError(errno.ENOSPC)
+            except Exception:
+                LogEvent(("ERROR",traceback.format_exc()))
 
         except IndexError:
             writing = False
     
     if backend == 'mmap':
         for ds in datastore:
-            await trio.sleep(0)
+            # await trio.sleep(0)
             ds.commit_next_write_position()
 
-    await trio.sleep(0)
+    # await trio.sleep(0)
     hash_table.commit()
-           
+
+
 # @profile
 async def dedup(data, stat_msg_queue):        
     global hash_table    
@@ -1128,11 +1131,11 @@ async def dedup(data, stat_msg_queue):
     start_time = time.time()
     bytes_processed = 0
 
-    if type(data) == bytearray or type(data) == bytes or type(data) == memoryview:
-        if type(data) == memoryview:
-            data = bytearray(data)
+    # if type(data) == bytearray or type(data) == bytes or type(data) == memoryview:
+    if type(data) != memoryview:
+        data = memoryview(data)
         
-        if len(data) <= min_blk_size:
+        if backend != 'rocksdb' and len(data) <= min_blk_size:
             _hashed_data = hash_data(data)
             blk_list.append(0)
             if _hashed_data in hash_table:
@@ -1140,30 +1143,53 @@ async def dedup(data, stat_msg_queue):
                 read_cache[_hashed_data] = data
                 update_index(_hashed_data)                
             else:
-                q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': bytearray(data), 'result': False}
+                q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': data, 'result': False}
                 q['compressed'], q['compressed_data'] = False, q['data'] #await compress_data(q['data'])
-                q['creation_time'] = time.time()
-                
+                q['creation_time'] = time.time()                                
                 blk_list[q['idx']] = FileBlock(_hashed_data, len(q['compressed_data']), len(q['data']))
                 write_read_cache[_hashed_data] = data
                 write_buffer.append(q)
+
+                '''
+                Creates the HashTable entry in advance, so we can identify duplicated data before
+                running write_new_data
+                '''
+                b = Block()
+                b.hash = q['hash']                
+                b.size = len(q['compressed_data'])
+                b.deflated_size = len(q['data'])
+                b.compressed = q['compressed']
+                hash_table[q['hash']] = b
+
                 bytes_processed = bytes_processed + len(data)
         else:
             ch = await variable_chunks(data)
             for c in ch:
                 blk_list.append(0)
 
-                if c.hash in hash_table:
+                if c.hash in hash_table:                    
                     blk_list[len(blk_list)-1] = FileBlock(c.hash, hash_table[c.hash].size, hash_table[c.hash].deflated_size)
                     read_cache[c.hash] = c.data
                     update_index(c.hash)
                 else:
-                    q = {'idx':len(blk_list)-1, 'hash':c.hash, 'data': bytearray(c.data), 'result': False}
+
+                    q = {'idx':len(blk_list)-1, 'hash':c.hash, 'data': c.data, 'result': False}
                     q['compressed'], q['compressed_data'] = await compress_data(q['data'])
                     q['creation_time'] = time.time()                    
                     blk_list[q['idx']] = FileBlock(c.hash, len(q['compressed_data']), len(q['data']))
                     write_read_cache[c.hash] = c.data
                     write_buffer.append(q)
+
+                    '''
+                    Creates the HashTable entry in advance, so we can identify duplicated data before
+                    running write_new_data
+                    '''
+                    b = Block()
+                    b.hash = q['hash']                
+                    b.size = len(q['compressed_data'])
+                    b.deflated_size = len(q['data'])
+                    b.compressed = q['compressed']
+                    hash_table[q['hash']] = b
 
                 bytes_processed = bytes_processed + len(c.data)
 
@@ -1261,9 +1287,10 @@ def persist(stat_msg_queue):
     while RUNNING:
         if (time.time() - last_time > gc_interval):
             garbage_collector(stat_msg_queue)
-            persist_data(stat_msg_queue)
+            if backend != 'rocksdb':
+                persist_data(stat_msg_queue)
             last_time = time.time()
-        time.sleep(10)
+        time.sleep(5)
 
     
 def usage(stat_msg_queue):
@@ -1279,7 +1306,7 @@ def usage(stat_msg_queue):
             stat_msg_queue.put({'INFO:Memory (resident)': resident()})
             stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
             last_time = time.time()
-        time.sleep(10)
+        time.sleep(5)
         # prof.dump_stats('get_file_data.lprof')
         # print(".")
 

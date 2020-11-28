@@ -16,14 +16,14 @@ mean_blk_size = confs['mean_blk_size']
 backend = confs['backend']
 
 
-async def commit_data(q:QueuedWrite, datastore:DataStore, free_blocks:IOBTree, fragmentation:dict):
+def commit_data(q:QueuedWrite, datastore:DataStore, free_blocks:IOBTree, fragmentation:dict):
     if backend == 'mmap' or backend == None:
-        written, q, datastore, free_blocks, fragmentation = await mm_commit(q, datastore, free_blocks, fragmentation)
+        written, q, datastore, free_blocks, fragmentation = mm_commit(q, datastore, free_blocks, fragmentation)
 
         return written, q, datastore, free_blocks, fragmentation
     
     elif backend == 'rocksdb':
-        written, q, datastore, free_blocks, fragmentation = await rocksdb_commit(q, datastore, free_blocks, fragmentation)
+        written, q, datastore, free_blocks, fragmentation = rocksdb_commit(q, datastore, free_blocks, fragmentation)
 
         return written, q, datastore, free_blocks, fragmentation
 

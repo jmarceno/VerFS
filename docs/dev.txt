@@ -6,3 +6,9 @@ python3 setup.py build
 
 Compiling RocksDB
 python setup.py build_ext --inplace
+
+
+SysBench
+sysbench --num-threads=16 --test=fileio --file-total-size=3G --file-test-mode=rndrw prepare
+sysbench --num-threads=16 --test=fileio --file-total-size=3G --file-test-mode=rndrw run
+sysbench --num-threads=16 --test=fileio --file-total-size=3G --file-test-mode=rndrw cleanup

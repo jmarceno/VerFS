@@ -6,10 +6,10 @@ small_block_cache_size : 10000
 
 allocation_unit : 1024
 
-mean_blk_size : 64
-min_blk_size : 16
-max_blk_size : 512
-small_block_limit : 8192 #4096  # Blocos com tamanho igual ou menor que este não serão compactados e serão armazenados em um local diferente especificado em small_block_path
+mean_blk_size : 128
+#min_blk_size : 32 # Auto calculated by the system
+#max_blk_size : 512 # Auto calculated by the system
+small_block_limit : 32 #4096  # Blocos com tamanho igual ou menor que este não serão compactados e serão armazenados em um local diferente especificado em small_block_path
 
 partition_size : 6  # Partion size in GB
 chunk_size_per_GB : 2 # Tamanho de cada um dos chunks TODO: How does this handles fractions?
@@ -34,3 +34,8 @@ log_file : /home/jmarceno/metadata/logs.txt
 # 'mmap': Data will be stored into chunks and persisted through a mmap interface -> Fast, fragmentation prone
 # 'rocksdb': (*RECOMMENDED*) Data will be stored into various rocksdb databases -> Not as fast as mmap but *safer* and does not suffer from fragmention
 backend: 'rocksdb'
+
+# Maximum number of write worker threads, responsible to flush data to disk
+# Increase this number in line with the number of cores and disks that the system has access to
+# More disks == More write workers (1-5 per disk is recommended)
+max_write_workers: 30

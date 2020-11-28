@@ -4,18 +4,28 @@ import os
 import errno
 from BTrees import IOBTree
 from pyfuse3 import FUSEError
+import trio
 
 from logger import LogEvent
 from datastructures import QueuedWrite, DataStore
 from hashtable import HashTable
 from compression import decompress_data
-from utils import load_configuration, datastore_opt, get_dir_size
+from utils import load_configuration, datastore_opt, get_dir_size, opt
 
 confs = load_configuration()
 
-#TODO: Check database size and limit writes when it reaches it's maximum size
+#TODO: Change writes to be done in batches. How to do that for various databases
 
-async def rocksdb_commit(q:QueuedWrite, datastore:list, free_blocks:IOBTree, fragmentation:dict):
+async def rocksdb_batch_commit(q:dict, datastore:list, free_blocks:IOBTree, fragmentation:dict):
+    raise NotImplementedError
+    # batch = rocksdb.WriteBatch()
+    # try:
+        
+    #     datastore.write(batch)
+    # return True
+
+
+def rocksdb_commit(q:QueuedWrite, datastore:list, free_blocks:IOBTree, fragmentation:dict):
     
     written = 0
     nw = 0
@@ -30,6 +40,7 @@ async def rocksdb_commit(q:QueuedWrite, datastore:list, free_blocks:IOBTree, fra
     try:
         for idx, ds in enumerate(datastore):
             if ds.next_write_position + (1024*1024) < ds.size:
+                # await trio.sleep(0)
                 nw = ds.next_write_position + written
                 ds.next_write_position = nw
                 q['chunk'] = ds.chunk
@@ -43,7 +54,7 @@ async def rocksdb_commit(q:QueuedWrite, datastore:list, free_blocks:IOBTree, fra
             elif idx == len(datastore)-1:
                 raise FUSEError(errno.ENOSPC)            
     except:
-        LogEvent(("ERROR",traceback.format_exc()))          
+        raise FUSEError(errno.ENOSPC)
     
     return written, q, datastore, free_blocks, fragmentation
 
