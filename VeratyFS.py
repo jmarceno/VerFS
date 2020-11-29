@@ -88,16 +88,10 @@ Maintain track of the program state. When it is set to false, the auxiliary/serv
 RUNNING = True 
 
 class Operations(pyfuse3.Operations):
-    '''An example filesystem that stores all data in memory
-    TODO: REVIEW THIS PROBLEMS
-    This is a very simple implementation with terrible performance.
-    Don't try to store significant amounts of data. Also, there are
-    some other flaws that have not been fixed to keep the code easier
-    to understand:
-
-    * atime, mtime and ctime are not updated
-    * generation numbers are not supported
-    * lookup counts are not maintained
+    '''
+    File system operations
+    Main loop responsible for receiving the requestes from the kernel and 
+    process the data
     '''    
     
     enable_writeback_cache = False
@@ -267,7 +261,7 @@ class Operations(pyfuse3.Operations):
         if not stat.S_ISDIR(entry.st_mode):
             raise pyfuse3.FUSEError(errno.ENOTDIR)
 
-        for i in self.inodes: # TODO: Don't know about that...really needed? If so, is really this way?
+        for i in self.inodes:
             if self.inodes[i].parent_inode == entry.st_ino and self.inodes[i].list_on_dir_lookup == True:
                 raise FUSEError(errno.ENOTEMPTY)       
         
@@ -281,17 +275,16 @@ class Operations(pyfuse3.Operations):
         if self.inodes[inode_p].inode != inode_p and self.inodes[inode_p].parent_inode == inode_p and self.inodes[inode_p].name != name:
             raise pyfuse3.FUSEError(errno.ENOTEMPTY)
 
-        for k, v in self.inodes.items(): #TODO: BISECT ?
-            if v.name == name and v.parent_inode == inode_p:
-                try:
-                    f = self.inodes[k].data                    
-                    for i in f:
-                        update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)
-                    pyfuse3.invalidate_entry_async(self.inodes[v.inode].parent_inode, self.inodes[v.inode].name, deleted=0, ignore_enoent=True)
-                    del self.inodes[k]
-                    break
-                except KeyError:
-                    LogEvent(("ERROR",traceback.format_exc()))
+        # for k, v in self.inodes.items():
+        #     if v.name == name and v.parent_inode == inode_p:
+        try:
+            f = self.inodes[entry.st_nlink].data
+            for i in f:
+                update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)
+            pyfuse3.invalidate_entry_async(self.inodes[entry.st_nlink].parent_inode, self.inodes[entry.st_nlink].name, deleted=0, ignore_enoent=True)
+            del self.inodes[entry.st_nlink]
+        except KeyError:
+            LogEvent(("ERROR",traceback.format_exc()))
 
 
     async def symlink(self, inode_p, name, target, ctx):
@@ -362,8 +355,6 @@ class Operations(pyfuse3.Operations):
         must update only the directory entry for *name_new* to point to
         *inode_moved* instead of *inode_deref*.'''
 
-        
-        # TODO: FUCKED UP - Both paths doo the exact same thing
         inode_moved = self.inodes[entry_old.st_ino]
         inode_deref = self.inodes[entry_new.st_ino]
         try:            
@@ -841,8 +832,7 @@ DEDUP, COMPRESSION, WRITE, DELETE, INDEXES MAINTAINANCE
 '''
 
 def get_usage(stat_msg_queue):
-    """
-    TODO: RECONSIDERAR TROCAR O KEY-INDEX POR UTLIZAÇÃO DE INDICE COM QUANTIDADE NOS BLOCOS
+    """    
     Return drive virtual (undeduped size) and physical (deduped_size) utilization
     :return: Undeduped Data Un-Compressed, Undeduped Data Compressed, Deduped Data Compressed, Deduped Data Removed, Compression rate
     """    
