@@ -1,6 +1,6 @@
 # import debugpy
 import os
-from utils import datastore_opt
+from utils import datastore_opt, define_chunks
 import rocksdb
 from compression import decompress_data, decompress_pickle, compress_data, compressed_pickle
 from configurations import *
@@ -34,20 +34,18 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
                     for b in list(fb.keys()):
                         fragmentation['free_size'] = fragmentation['free_size'] + (len(fb.get(b)) * b)
                         fragmentation['free_count'] = fragmentation['free_count'] + len(fb.get(b))
-        
-    if confs['backend'] == 'mmap':
-        chunk_msg = False
-        for chunk in datastore_chunks:
-            chunk_path = os.path.join(datastore_base_path, 'chunk' + str(chunk) + '.ds.vfs')
+    
+    
+    stores = define_chunks(datastore_chunks, datastore_base_path, confs['backend'])
+
+    if confs['backend'] == 'mmap':        
+        for chunk, chunk_path in enumerate(stores):
+            # chunk_path = os.path.join(datastore_base_path, 'chunk' + str(chunk) + '.bin')
             
             if not os.path.isfile(free_blocks_path):
                 free_blocks.append(IOBTree.IOBTree())
 
             if os.path.isfile(chunk_path):
-                if not chunk_msg:
-                    print("Found existing File System. Re-mounting "+ str(chunk) + " Chunks.")
-                    chunk_msg = True
-                
                 with open(chunk_path, "r+b") as f:
                     mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)        
                     mm.seek(0)                
@@ -57,7 +55,7 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
                     del mm
 
             else:
-                f = open(os.path.join(datastore_base_path, 'chunk'+str(chunk)+'.ds.vfs'), "wb")            
+                f = open(chunk_path, "wb")            
                 n = (65).to_bytes(64, byteorder='little')
                 f.write(n)
                 f.truncate(chunk_size)
@@ -68,10 +66,9 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
                 if not os.path.isfile(free_blocks_path):
                     free_blocks.append(IOBTree.IOBTree())
     
-    elif confs['backend'] == 'rocksdb':
-        chunk_msg = False
-        for chunk in datastore_chunks:
-            chunk_path = os.path.join(datastore_base_path, 'chunk' + str(chunk) + '.ds.vfs')
+    elif confs['backend'] == 'rocksdb':        
+        for chunk, chunk_path in enumerate(stores):
+            # chunk_path = os.path.join(datastore_base_path, 'chunk' + str(chunk))
             db = rocksdb.DB(chunk_path, datastore_opt())
             
             if not os.path.isfile(free_blocks_path):
@@ -79,8 +76,7 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
             else:
                 free_blocks.append(IOBTree.IOBTree())
             
-            datastore.append(DataStore(chunk, chunk_size, chunk_path, 0, db))
-                   
+            datastore.append(DataStore(chunk, chunk_size, chunk_path, 0, db))                   
 
 
     print("File System Ready")

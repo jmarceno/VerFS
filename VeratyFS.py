@@ -16,6 +16,7 @@ VeratyFS File System
 
 # tracemalloc.start()
 
+from errno import ENOSPC
 import os
 from storage.rocksdb_backend import rocksdb_delete
 import sys
@@ -745,7 +746,7 @@ class Operations(pyfuse3.Operations):
         called multiple times for the same open file (e.g. if the file handle
         has been duplicated).
         '''
-
+        #TODO: Make threads report back to raise events like no space on disk
         if threading.active_count() <= max_write_workers:
             threading.Thread(target=write_new_blocks, args=(write_buffer, resq, self.stat_msg_queue,)).start()
             await self.inodes.commit()
@@ -1033,7 +1034,8 @@ def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                     except:
                         stat_msg_queue.put_nowait({'DEBUG' : "Error writing data to disk"})                            
                         LogEvent(("ERROR",traceback.format_exc()))
-                        raise FUSEError(errno.EIO)   
+                        raise FUSEError(errno.ENOSPC)
+                        # raise FUSEError(errno.EIO)
                     
                 try:
                     read_cache[q['hash']] = write_read_cache[q['hash']] #TODO: Check why the cache is invalid wihtout this line

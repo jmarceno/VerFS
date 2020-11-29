@@ -2,6 +2,7 @@ import rocksdb
 import traceback
 import os
 import errno
+import random
 from BTrees import IOBTree
 from pyfuse3 import FUSEError
 import trio
@@ -24,11 +25,26 @@ async def rocksdb_batch_commit(q:dict, datastore:list, free_blocks:IOBTree, frag
     #     datastore.write(batch)
     # return True
 
+'''
+Receives a list of datastores and return one suitable for writing, trying to spread the writes
+'''
+def pick_datastore(datastore:list) -> DataStore:
+    l = []
+    [l.append(x) for x in range(len(datastore)-1)]
+    
+    while len(l) > 0:
+        store = random.choice(l)
+        datastore[store].next_write_position = get_dir_size(datastore[store].path)
+        if datastore[store].next_write_position < datastore[store].size:
+            return store
+        else:
+            l.remove(store)
+    
+    return -1
+    
 
 def rocksdb_commit(q:QueuedWrite, datastore:list, free_blocks:IOBTree, fragmentation:dict):
-    
     written = 0
-    nw = 0
 
     if q['compressed']:
         data = q['compressed_data']
@@ -36,21 +52,17 @@ def rocksdb_commit(q:QueuedWrite, datastore:list, free_blocks:IOBTree, fragmenta
     else:
         data = q['data']
         written = len(q['data'])
+        
     
-    try:
-        for idx, ds in enumerate(datastore):
-            ds.next_write_position = get_dir_size(ds.path)
-            
-            if ds.next_write_position < ds.size:                
-                q['chunk'] = ds.chunk
-                q['block'] = ds.next_write_position          
-                ds.db.put(q['hash'].encode(), bytes(data))                
-                break
-            elif idx == len(datastore)-1:
-                print(ds.next_write_position)
-                raise FUSEError(errno.ENOSPC)            
-    except:
-        print(ds.next_write_position)
+    store = pick_datastore(datastore)
+    if store != -1:
+        try:              
+            q['chunk'] = datastore[store].chunk        
+            q['block'] = datastore[store].next_write_position
+            datastore[store].db.put(q['hash'].encode(), bytes(data))        
+        except:
+            raise IOError
+    else:
         raise FUSEError(errno.ENOSPC)
     
     return written, q, datastore, free_blocks, fragmentation

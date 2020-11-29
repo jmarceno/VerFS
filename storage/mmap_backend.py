@@ -30,7 +30,7 @@ async def mm_commit(q:QueuedWrite, datastore:DataStore, free_blocks:IOBTree, fra
     
     return written, q, datastore, free_blocks, fragmentation
 
-
+#TODO: Implement write spread
 async def find_location(q:QueuedWrite, datastore:DataStore, free_blocks:IOBTree, fragmentation:dict):
     for idx, ds in enumerate(datastore):
         if not ds.IS_FULL and not ds.LOCKED:

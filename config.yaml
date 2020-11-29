@@ -23,13 +23,38 @@ chunk_size_per_GB : 1 # Tamanho de cada um dos chunks TODO: How does this handle
 # datastore_base_path and small_block_db_path can be a list with multiply locations
 # the system will spreads the reads and writes between this locations to improve
 # safety and performance
+# In cases of a non-even distribution, the system will give preference to store the last chunks in
+# the order that the datastores are entered in the list
+# Datastore sizes are symmetrical and and defined at *chunk_size_per_gb*
 
 fs_meta_path : '/home/jmarceno/metadata/filesystem'
 hash_table_path : '/home/jmarceno/metadata/hashtable'
 free_blocks_path : '/home/jmarceno/metadata/freeblocks'
 gc_path : '/home/jmarceno/metadata/gc'
-small_block_db_path : '/home/jmarceno/metadata/smbs'
-datastore_base_path : '/home/jmarceno/metadata/'
+small_block_db_path : ['/home/jmarceno/metadata/smbs']
+datastore_base_path : ['/home/jmarceno/metadata/meta01',/run/media/jmarceno/Vault/linux_back/metadata/meta02]
+
+#TODO: Implement metadata replication
+# Indicates if the system will keep an additional copy of the metadata
+# Writes will be done in sync. Reads will only be performed at the original
+replicate_metadata: False
+metadata_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata'
+
+#TODO: Implement data replication
+# Indicates if the system will keep an additional copy of the data
+# Writes will be done in sync. Reads will only be performed at the original
+# Ideally the same number of paths given at *datastore_base_path* should be given here,
+# but the system will work with any number of paths.
+# Note that *write spread* is applied here too
+replicate_data: False
+data_replication_path: ['/run/media/jmarceno/Vault/linux_back/metadata']
+
+#TODO: Implement path aware datastore distribuition
+# If *False*, the system will write to a datastore until it is full
+# only then, moving to the next one
+# If *True*, the system will try to spread all the writes evenly through all the datastores.
+# For better performance, *Enable* if datastores are on different disks/machines, disable otherwise
+write_spread: True
 
 # Used on the datastore to ini
 identity_string : 'VeratyFS@v0.0.1@InLineDedup,FixedStoreSize,GC,Compression,FixedBlockSize\n'
@@ -37,7 +62,6 @@ identity_string : 'VeratyFS@v0.0.1@InLineDedup,FixedStoreSize,GC,Compression,Fix
 q_random : 2 # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue
 
 web_interface : 'localhost:5555'
-
 log_file : /home/jmarceno/metadata/logs.txt
 
 # Storage Backend for data persistance

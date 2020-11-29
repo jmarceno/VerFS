@@ -53,6 +53,7 @@ datastore_chunks = list(range(0, datastore_chunks_number))
 identity_string = confs['identity_string']
 
 backend = confs['backend']
+write_spread = confs['write_spread']
 
 max_write_workers = confs['max_write_workers'] + 9 # 9 is the number of threads that are constantly running without consider the write threads
 

@@ -5,6 +5,7 @@ import yaml
 import traceback
 import os
 
+
 def take_closest(ordList, myNumber, left=True):
     """
     Assumes myList is sorted. Returns closest value to myNumber.
@@ -136,3 +137,25 @@ def get_dir_size(path:str) -> int:
         return sum(f.stat().st_size for f in root_directory.glob('**/*') if f.is_file())
     except FileNotFoundError:
         return 0
+
+
+def define_chunks(datastore_chunks:list, datastore_base_path:list, backend:str) -> list:
+    if backend == 'mmap':
+        name = 'chunk'
+        suffix = 'bin'        
+    else:
+        suffix = ''
+        name = 'store'
+
+    stores = []
+    current_store_path = 0
+    for chunk in datastore_chunks:
+        stores.append(os.path.join(datastore_base_path[current_store_path], name + str(chunk) + suffix))
+        current_store_path = current_store_path + 1
+        if current_store_path == len(datastore_base_path):
+            current_store_path = 0
+
+        if not os.path.isdir(stores[-1]):
+            os.makedirs(stores[-1])
+
+    return stores
