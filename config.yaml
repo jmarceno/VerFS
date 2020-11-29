@@ -44,6 +44,7 @@ fsmeta_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata/mirror/f
 hashtable_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata/mirror/hashtable'
 
 #TODO: Implement data replication
+#TODO: Implement the option to use the replicated copy to speed up reads (aka Read Spread)
 # Indicates if the system will keep an additional copy of the data
 # Writes will be done in sync. Reads will only be performed at the original
 # Ideally the same number of paths given at *datastore_base_path* should be given here,
