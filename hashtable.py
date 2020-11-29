@@ -12,16 +12,24 @@ confs = load_configuration()
 
 hash_table_path = confs['hash_table_path']
 
+
 class HashTable(MutableMapping):    
     def __init__(self, *a, **k):
         self.d = dict(*a, **k)
-        self.pending = {}
-
+        self.pending = {}        
         #Create HashTable directoty tree if it does no exist
         if not os.path.isdir(confs['hash_table_path']):
             os.makedirs(confs['hash_table_path'])
 
-        self.ht = rocksdb.DB(hash_table_path, opt())        
+        self.ht = rocksdb.DB(hash_table_path, opt())
+
+        self.replication = confs['replicate_metadata']
+        if self.replication:
+            self.replication_path = confs['hashtable_replication_path']
+            if not os.path.isdir(self.replication_path):
+                os.makedirs(self.replication_path)
+            self.mirror = rocksdb.DB(self.replication_path, opt())
+
 
         if os.path.isdir(hash_table_path):
             self.init_from_disk()
@@ -73,6 +81,10 @@ class HashTable(MutableMapping):
                 batch.put(k.encode(), pickle.dumps(v))
 
             self.ht.write(batch)
+
+            if self.replication:
+                self.mirror.write(batch)
+            
             return True
         
         except:
@@ -81,7 +93,11 @@ class HashTable(MutableMapping):
 
     def remove_from_disk(self, k):                
         try:
-            self.ht.delete(k.encode())            
+            self.ht.delete(k.encode())
+
+            if self.replication:
+                self.mirror.delete(k.encode())
+
             return True
         except:
             print(traceback.format_exc())

@@ -34,11 +34,14 @@ gc_path : '/home/jmarceno/metadata/gc'
 small_block_db_path : ['/home/jmarceno/metadata/smbs']
 datastore_base_path : ['/home/jmarceno/metadata/meta01',/run/media/jmarceno/Vault/linux_back/metadata/meta02]
 
-#TODO: Implement metadata replication
 # Indicates if the system will keep an additional copy of the metadata
 # Writes will be done in sync. Reads will only be performed at the original
-replicate_metadata: False
-metadata_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata'
+# Notes:
+# 1. This almost double the amount of data taken by the metadata
+# 2. Causes a slight increased in persistence latency, wich can reduce write speeds, but impact here is minimal
+replicate_metadata: True
+fsmeta_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata/mirror/fsmeta'
+hashtable_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata/mirror/hashtable'
 
 #TODO: Implement data replication
 # Indicates if the system will keep an additional copy of the data
