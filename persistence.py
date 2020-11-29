@@ -20,8 +20,10 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
 
     print("Setting-up File System Metadata")
     
+
     if os.path.isfile(gc_path):
-        GC = decompress_pickle(gc_path)
+        GC = decompress_pickle(gc_path)         
+    
     
     if confs['backend'] == 'mmap':
         if os.path.isfile(free_blocks_path):

@@ -16,7 +16,11 @@ class HashTable(MutableMapping):
     def __init__(self, *a, **k):
         self.d = dict(*a, **k)
         self.pending = {}
-        
+
+        #Create HashTable directoty tree if it does no exist
+        if not os.path.isdir(confs['hash_table_path']):
+            os.makedirs(confs['hash_table_path'])
+
         self.ht = rocksdb.DB(hash_table_path, opt())        
 
         if os.path.isdir(hash_table_path):

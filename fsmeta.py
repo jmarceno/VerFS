@@ -17,6 +17,11 @@ class FSMeta(MutableMapping):
     def __init__(self, *a, **k):
         self.d = dict(*a, **k)
         self.pending = {}
+
+        #Create FSMeta directoty tree if it does no exist
+        if not os.path.isdir(confs['fs_meta_path']):
+            os.makedirs(confs['fs_meta_path'])
+
         self.ht = rocksdb.DB(fs_meta_path, opt())
         
         if os.path.isdir(fs_meta_path):            

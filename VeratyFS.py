@@ -1336,10 +1336,10 @@ if __name__ == '__main__':
     operations = Operations(stat_msg_queue)
 
     # Try cleaning previous mount
-    try:
-        os.system("fusermount -u "+options.mountpoint)
-    except:
-        pass
+    # try:
+    #     os.system("fusermount -u "+options.mountpoint)
+    # except:
+    #     pass
 
     fuse_options = set(pyfuse3.default_options)
     fuse_options.add('fsname=VeratyFS')
