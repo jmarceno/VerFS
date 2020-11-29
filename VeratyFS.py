@@ -18,6 +18,7 @@ VeratyFS File System
 
 from errno import ENOSPC
 import os
+from random import randint
 from storage.rocksdb_backend import rocksdb_delete
 import sys
 import multiprocessing as mp
@@ -81,6 +82,13 @@ log = logging.getLogger()
 wq = mp.Queue() # Fila de mensagens a serem escritas no disco TODO: REMOVE IN THE FUTURE
 resq = mp.Queue() # Fila com as respostas das mensagens escritas - TODO:REMOVE IN THE FUTURE
 swq = mp.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno TODO: REMOVE DEPRECATED
+
+'''
+Global variables for statistics and state monitoring
+No persistance is necessary
+'''
+cache_hits = 0
+cache_misses = 0
 
 '''
 Maintain track of the program state. When it is set to false, the auxiliary/service threads are all finish the execution
@@ -278,11 +286,11 @@ class Operations(pyfuse3.Operations):
         # for k, v in self.inodes.items():
         #     if v.name == name and v.parent_inode == inode_p:
         try:
-            f = self.inodes[entry.st_nlink].data
+            f = self.inodes[entry.st_ino].data
             for i in f:
                 update_index(i.hash, add=False, stat_msg_queue=self.stat_msg_queue)
-            pyfuse3.invalidate_entry_async(self.inodes[entry.st_nlink].parent_inode, self.inodes[entry.st_nlink].name, deleted=0, ignore_enoent=True)
-            del self.inodes[entry.st_nlink]
+            pyfuse3.invalidate_entry_async(self.inodes[entry.st_ino].parent_inode, self.inodes[entry.st_ino].name, deleted=0, ignore_enoent=True)
+            del self.inodes[entry.st_ino]
         except KeyError:
             LogEvent(("ERROR",traceback.format_exc()))
 
@@ -935,8 +943,7 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
     """        
     global free_blocks
 
-
-    in_index = False        
+    in_index = False
 
     if idx in hash_table:
         in_index = True    
@@ -1027,10 +1034,10 @@ def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                         raise FUSEError(errno.ENOSPC)
                         # raise FUSEError(errno.EIO)
                     
-                try:
-                    read_cache[q['hash']] = write_read_cache[q['hash']] #TODO: Check why the cache is invalid wihtout this line
-                    del write_read_cache[q['hash']]
+                try:                    
+                    del write_read_cache[q['hash']]                    
                 except KeyError:
+                    print("cache error")
                     pass
 
                 q['result'] = True             
@@ -1207,16 +1214,26 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
     return data
 
 
-def seek_in_cache(_blk_hash):    
+def seek_in_cache(_blk_hash):
+    global cache_misses
+    global cache_hits
+
     try:
-        return read_cache[_blk_hash]
+        r = read_cache[_blk_hash]
+        cache_hits = cache_hits + 1
+        return r
     except KeyError:
         try:
-            return small_block_read_cache[_blk_hash]
+            r = small_block_read_cache[_blk_hash]
+            cache_hits = cache_hits + 1
+            return r
         except KeyError:
             try:
-                return write_read_cache[_blk_hash]
+                r = write_read_cache[_blk_hash]
+                cache_hits = cache_hits + 1
+                return r
             except KeyError:
+                cache_misses = cache_misses + 1       
                 return None
 
 
@@ -1250,12 +1267,16 @@ def usage(stat_msg_queue):
     while RUNNING:        
         if (time.time() - last_time > usage_interval):              
             get_usage(stat_msg_queue)
-            stat_msg_queue.put({'INFO:TOTAL_MEMORY': mem})
-            stat_msg_queue.put({'INFO:Memory (active in use)': unix_memory()})
-            stat_msg_queue.put({'INFO:Memory (resident)': resident()})
-            stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
+            if randint(1, 5) == 1:
+                stat_msg_queue.put({'INFO:TOTAL_MEMORY': mem})
+                stat_msg_queue.put({'INFO:Memory (active in use)': unix_memory()})
+                stat_msg_queue.put({'INFO:Memory (resident)': resident()})
+                stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
+                stat_msg_queue.put({'INFO:CACHE HIT': cache_hits})
+                stat_msg_queue.put({'INFO:CACHE MISS': cache_misses})
+                
             last_time = time.time()
-        time.sleep(5)
+        time.sleep(3)
         # prof.dump_stats('get_file_data.lprof')
         # print(".")
 
@@ -1315,9 +1336,7 @@ async def parent(stat_msg_queue):
             LogEvent(("ERROR",traceback.format_exc()))
 
 '''
-
 MAIN PROGRAM
-
 '''
 
 if __name__ == '__main__':
@@ -1365,8 +1384,8 @@ if __name__ == '__main__':
     finally:        
         RUNNING = False
         pyfuse3.close(unmount=True)        
-        print("Asking nicely for threads to finish")
-        LogEvent(("INFO","Asking nicely for threads to finish"))        
+        print("Flushing data to disk. This can take some time, please wait.\n Forcing termination can cause data loss!!!")
+        LogEvent(("INFO","UnMounting and Flushing data to disk."))
         stat_sender.terminate()
         stat_sender.join(10)
         stat_sender.kill()

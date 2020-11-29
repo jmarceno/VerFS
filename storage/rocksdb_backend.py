@@ -30,7 +30,7 @@ Receives a list of datastores and return one suitable for writing, trying to spr
 '''
 def pick_datastore(datastore:list) -> DataStore:
     l = []
-    [l.append(x) for x in range(len(datastore)-1)]
+    [l.append(x) for x in range(len(datastore))]
     
     while len(l) > 0:
         store = random.choice(l)
