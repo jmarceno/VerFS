@@ -13,7 +13,8 @@ from utils import load_configuration
 
 confs = load_configuration()
 
-async def mm_commit(q:QueuedWrite, datastore:DataStore, free_blocks:IOBTree, fragmentation:dict):
+#TODO: Implement data replication
+async def mm_commit(q:QueuedWrite, datastore:DataStore, mirror_datastore:list, free_blocks:IOBTree, fragmentation:dict):
     
     q, datastore, free_blocks, fragmentation  = find_location(q, datastore, free_blocks, fragmentation)
     #TODO: Implement a fail safe route in case of *VALUEERROR* caused by trying to write above the data chunk size limit

@@ -2,7 +2,7 @@
 import os
 from utils import datastore_opt, define_chunks
 import rocksdb
-from compression import decompress_data, decompress_pickle, compress_data, compressed_pickle
+from compression import decompress_data, decompress_pickle, compress_data, compressed_pickle, lzma_decompress
 from configurations import *
 from datastructures import DataStore
 import mmap
@@ -13,7 +13,8 @@ from BTrees import IOBTree
 def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, _GC=None):    
     from configurations import free_blocks_path, datastore_base_path, gc_path
     
-    global datastore    
+    global datastore
+    global mirror_datastore  
     global free_blocks
     global GC
     global fragmentation   
@@ -40,10 +41,16 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
     
     stores = define_chunks(datastore_chunks, datastore_base_path, confs['backend'])
 
+    mirror_stores = []
+    if confs['replicate_data']:
+        mirror_stores = define_chunks(mirror_datastore_chunks, confs['data_replication_path'], confs['backend'])
+
+    l_size = len(stores) - 1
+
     if confs['backend'] == 'mmap':        
-        for chunk, chunk_path in enumerate(stores):
+        for chunk, chunk_path in enumerate(stores.append(mirror_stores+mirror_stores)):
             # chunk_path = os.path.join(datastore_base_path, 'chunk' + str(chunk) + '.bin')
-            
+
             if not os.path.isfile(free_blocks_path):
                 free_blocks.append(IOBTree.IOBTree())
 
@@ -51,8 +58,11 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
                 with open(chunk_path, "r+b") as f:
                     mm = mmap.mmap(f.fileno(), length=chunk_size, access=mmap.ACCESS_WRITE)        
                     mm.seek(0)                
-                    d = int.from_bytes(mm.read(64), "little")                    
-                    datastore.append(DataStore(chunk, chunk_size, chunk_path, d))
+                    d = int.from_bytes(mm.read(64), "little")
+                    if chunk <= l_size:
+                        datastore.append(DataStore(chunk, chunk_size, chunk_path, d))
+                    else:
+                        mirror_datastore.append(DataStore(chunk-l_size-1, mirror_chunk_size, chunk_path, d))
                     mm.close()
                     del mm
 
@@ -63,13 +73,14 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
                 f.truncate(chunk_size)
                 f.flush()
                 f.close()
-                datastore.append(DataStore(chunk, chunk_size, chunk_path, 65))       
+                datastore.append(DataStore(chunk, chunk_size, chunk_path, 65)) 
 
                 if not os.path.isfile(free_blocks_path):
                     free_blocks.append(IOBTree.IOBTree())
+        
     
     elif confs['backend'] == 'rocksdb':        
-        for chunk, chunk_path in enumerate(stores):
+        for chunk, chunk_path in enumerate(stores+mirror_stores):
             # chunk_path = os.path.join(datastore_base_path, 'chunk' + str(chunk))
             db = rocksdb.DB(chunk_path, datastore_opt())
             
@@ -78,12 +89,15 @@ def init_persistance( _datastore=None, _free_blocks=None, _partition_size=None, 
             else:
                 free_blocks.append(IOBTree.IOBTree())
             
-            datastore.append(DataStore(chunk, chunk_size, chunk_path, 0, db))                   
-
+            if chunk <= l_size:
+                datastore.append(DataStore(chunk, chunk_size, chunk_path, 0, db))
+            else:
+                mirror_datastore.append(DataStore(chunk-l_size-1, mirror_chunk_size, chunk_path, 0, db))
+            
 
     print("File System Ready")
 
-    return datastore, free_blocks, GC
+    return datastore, mirror_datastore, free_blocks, GC
 
 
 def persist_data(stat_msg_queue=None):

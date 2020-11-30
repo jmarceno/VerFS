@@ -83,6 +83,9 @@ wq = mp.Queue() # Fila de mensagens a serem escritas no disco TODO: REMOVE IN TH
 resq = mp.Queue() # Fila com as respostas das mensagens escritas - TODO:REMOVE IN THE FUTURE
 swq = mp.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno TODO: REMOVE DEPRECATED
 
+# if replicate_data and (replication_type == 'async' or replication_type == 'batch'):
+#     mirror_queue = mp.Queue()
+
 '''
 Global variables for statistics and state monitoring
 No persistance is necessary
@@ -120,7 +123,9 @@ class Operations(pyfuse3.Operations):
         self.services = []
         self.services.append(threading.Thread(target=persist, args=(self.stat_msg_queue,), daemon=True).start())
         self.services.append(threading.Thread(target=usage, args=(self.stat_msg_queue,), daemon=True).start())
-
+        
+        # if replicate_data and (replication_type == 'async' or replication_type == 'batch'):
+        #     self.services.append(mp.Process(target=, args=(self.stat_msg_queue, )))
 
     def init_file_system(self):
         '''Initialize file system '''
@@ -883,6 +888,7 @@ def garbage_collector(stat_msg_queue):
     global hash_table    
     global fragmentation
     global datastore
+    global mirror_datastore
     
     try:        
         while len(GC.add_uses) > 0:
@@ -899,7 +905,7 @@ def garbage_collector(stat_msg_queue):
                 hash_table[remove].DELETED = True
                 if hash_table[remove].DELETION_TIME is not None and time.time() - hash_table[remove].DELETION_TIME > 5:
                     if hash_table[remove].size <= small_block_limit:
-                        r = delete_small_block(remove, stat_msg_queue)
+                        r = delete_small_block(remove, mirror_datastore, stat_msg_queue)
                         if not r:
                             LogEvent(("ERROR","DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete."))                            
                     elif backend == 'rocksdb':
@@ -997,6 +1003,7 @@ def write_new_blocks(_queued_writes, resq, stat_msg_queue):
     '''
     global chunk_size
     global datastore
+    global mirror_datastore
     global free_blocks    
     global hash_table
     global fragmentation
@@ -1014,16 +1021,16 @@ def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                     if q['compressed']:                            
                         q['chunk'] = -1
                         q['block'] = -1
-                        written = write_small_block(q['hash'], q['compressed_data'], stat_msg_queue)                            
+                        written = write_small_block(q['hash'], q['compressed_data'], mirror_datastore, stat_msg_queue)
                     else:                            
                         q['chunk'] = -1
                         q['block'] = -1
-                        written = write_small_block(q['hash'], q['data'], stat_msg_queue)
+                        written = write_small_block(q['hash'], q['data'], mirror_datastore, stat_msg_queue)
                     if random.randrange(0,10) == 0:
                         stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})    
                 else:                        
                     try:                            
-                        written, q, datastore, free_blocks, fragmentation = commit_data(q,datastore, free_blocks, fragmentation)
+                        written, q, datastore, mirror_datastore, free_blocks, fragmentation = commit_data(q,datastore, mirror_datastore, free_blocks, fragmentation)
                         
                         if random.randrange(0,10) == 0:
                             stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})
@@ -1343,7 +1350,7 @@ if __name__ == '__main__':
 
     from functools import partial
 
-    datastore, free_blocks, GC = init_persistance()
+    datastore, mirror_datastore, free_blocks, GC = init_persistance()
 
     stat_msg_queue = mp.Queue()
     

@@ -31,22 +31,22 @@ and garbage collect, if needed, have to be properly addressed the main program (
 
 '''
 
-def commit_data(q:QueuedWrite, datastore:list, free_blocks:IOBTree, fragmentation:dict):
+def commit_data(q:QueuedWrite, datastore:list, mirror_datastore:list, free_blocks:IOBTree, fragmentation:dict):
     if backend == 'mmap' or backend == None:
-        written, q, datastore, free_blocks, fragmentation = mm_commit(q, datastore, free_blocks, fragmentation)
+        written, q, datastore, mirror_datastore, free_blocks, fragmentation = mm_commit(q, datastore, mirror_datastore, free_blocks, fragmentation)
 
-        if replicate_data:
-            replication()
+        # if replicate_data:
+        #     replication()
 
-        return written, q, datastore, free_blocks, fragmentation
+        return written, q, datastore, mirror_datastore, free_blocks, fragmentation
     
     elif backend == 'rocksdb':
-        written, q, datastore, free_blocks, fragmentation = rocksdb_commit(q, datastore, free_blocks, fragmentation)
+        written, q, datastore, mirror_datastore, free_blocks, fragmentation = rocksdb_commit(q, datastore, mirror_datastore, free_blocks, fragmentation)
 
-        if replicate_data:
-            replication()
+        # if replicate_data:
+        #     replication()
 
-        return written, q, datastore, free_blocks, fragmentation
+        return written, q, datastore, mirror_datastore, free_blocks, fragmentation
 
 
 def read_data(hash:str, offset:int, ds:DataStore, read_size:int, hashtable:HashTable):

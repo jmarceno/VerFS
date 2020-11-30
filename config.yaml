@@ -32,7 +32,7 @@ hash_table_path : '/home/jmarceno/metadata/hashtable'
 free_blocks_path : '/home/jmarceno/metadata/freeblocks'
 gc_path : '/home/jmarceno/metadata/gc'
 small_block_db_path : ['/home/jmarceno/metadata/smbs']
-datastore_base_path : ['/home/jmarceno/metadata/meta01',/run/media/jmarceno/Vault/linux_back/metadata/meta02]
+datastore_base_path : ['/home/jmarceno/metadata/data01',/run/media/jmarceno/Vault/linux_back/metadata/data02]
 
 # Indicates if the system will keep an additional copy of the metadata
 # Writes will be done in sync. Reads will only be performed at the original
@@ -48,18 +48,20 @@ hashtable_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata/mirro
 # Indicates if the system will keep an additional copy of the data
 # Writes will be done in sync. Reads will only be performed at the original
 # Replication can be done sync or async or batch
-# Sync causes the copy do be done together with the orginal write
-# Async queue the data to be replicated at another thread
-# Batch replicates the data during the GC (Garbage Collection) process
-# Sync is safer but slower, Async is faster but a power outage can cause the data to not be flushed
+# Sync causes the copy do be done together with the orginal write - Low memory usage
+# Async queue the data to be replicated at another thread - High Memort usage
+# Batch replicates the data during the GC (Garbage Collection) process - High Memory Usage
+# Sync is safer but slower, Async and Batchs are faster but a power outage can cause the data to not be flushed
+# Async and Batch can be more memory intensive, as data need the remains in cache until flush
 # In cause of data inconsistence, the system will try to sync both copies of the data during a restarted
 # Ideally the same number of paths given at *datastore_base_path* should be given here,
 # but the system will work with any number of paths.
 # Note that *write spread* is applied here too
-replicate_data: False
+# *mirror_chunk_size_per_GB* should be calculated with the same considerations of *chunk_size_per_gb*
+replicate_data: True
 replication_type: 'sync'
-data_replication_path: ['/run/media/jmarceno/Vault/linux_back/metadata']
-
+data_replication_path: ['/run/media/jmarceno/Vault/linux_back/metadata/replication']
+mirror_chunk_size_per_GB : 5
 #TODO: Implement path aware datastore distribuition
 # If *False*, the system will write to a datastore until it is full
 # only then, moving to the next one

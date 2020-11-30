@@ -9,6 +9,7 @@ from utils import load_configuration
 confs = load_configuration()
 
 datastore = []
+mirror_datastore = []
 hash_table = HashTable()
 fragmentation = {}
 fragmentation['free_size'] = 0
@@ -23,6 +24,7 @@ gc_interval = confs['gc_interval']
 dirs = {}
 write_read_cache = {}
 write_buffer = deque()
+
 
 read_cache = LRU(maxlen=confs['cache_size'])
 small_block_read_cache =LRU(maxlen=confs['small_block_cache_size'])
@@ -41,6 +43,10 @@ chunk_size_per_GB = confs['chunk_size_per_GB']
 chunk_size = int(ceil(chunk_size_per_GB * 1073741824))
 datastore_chunks_number = int(ceil(ds_size/chunk_size))  # DataStore chunks equal to one every GB of partition size
 
+mirror_chunk_size_per_GB = confs['mirror_chunk_size_per_GB']
+mirror_chunk_size = int(ceil(mirror_chunk_size_per_GB * 1073741824))
+mirror_datastore_chunks_number = int(ceil(ds_size/mirror_chunk_size))  # DataStore chunks equal to one every GB of partition size
+
 fs_meta_path = confs['fs_meta_path']
 hash_table_path = confs['hash_table_path']
 free_blocks_path = confs['free_blocks_path']
@@ -49,12 +55,13 @@ small_block_db_path = confs['small_block_db_path']
 datastore_base_path = confs['datastore_base_path']
 
 datastore_chunks = list(range(0, datastore_chunks_number))
+mirror_datastore_chunks = list(range(0, mirror_datastore_chunks_number))
 
 identity_string = confs['identity_string']
+max_write_workers = confs['max_write_workers'] + 9 # 9 is the number of threads that are constantly running without consider the write threads
+q_random = confs['q_random'] # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue
 
 backend = confs['backend']
 write_spread = confs['write_spread']
-
-max_write_workers = confs['max_write_workers'] + 9 # 9 is the number of threads that are constantly running without consider the write threads
-
-q_random = confs['q_random'] # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue
+replicate_data = confs['replicate_data']
+replication_type = confs['replication_type'].lower()

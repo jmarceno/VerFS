@@ -123,18 +123,18 @@ def datastore_opt():
     opts.table_factory = rocksdb.BlockBasedTableFactory(
     checksum='xxhash',
     filter_policy=rocksdb.BloomFilterPolicy(10),
-    block_cache=rocksdb.LRUCache(4 * (1024 ** 3)),
+    block_cache=rocksdb.LRUCache(0.2 * (1024 ** 3)),
     block_size=(128)*1024,
-    block_cache_compressed=rocksdb.LRUCache(1 * (1024 ** 3)),
+    block_cache_compressed=rocksdb.LRUCache(0.2 * (1024 ** 3)),
     cache_index_and_filter_blocks=True)
 
     return opts
 
-
+#TODO: Check on how to eleminate the .fuse_hidden files 
 def get_dir_size(path:str) -> int:
     try:
         root_directory = Path(path)
-        return sum(f.stat().st_size for f in root_directory.glob('**/*') if f.is_file())
+        return sum(f.stat().st_size for f in root_directory.glob('**/*') if f.is_file() and not f.name.startswith('.'))
     except FileNotFoundError:
         return 0
 
