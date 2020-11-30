@@ -47,10 +47,17 @@ hashtable_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata/mirro
 #TODO: Implement the option to use the replicated copy to speed up reads (aka Read Spread)
 # Indicates if the system will keep an additional copy of the data
 # Writes will be done in sync. Reads will only be performed at the original
+# Replication can be done sync or async or batch
+# Sync causes the copy do be done together with the orginal write
+# Async queue the data to be replicated at another thread
+# Batch replicates the data during the GC (Garbage Collection) process
+# Sync is safer but slower, Async is faster but a power outage can cause the data to not be flushed
+# In cause of data inconsistence, the system will try to sync both copies of the data during a restarted
 # Ideally the same number of paths given at *datastore_base_path* should be given here,
 # but the system will work with any number of paths.
 # Note that *write spread* is applied here too
 replicate_data: False
+replication_type: 'sync'
 data_replication_path: ['/run/media/jmarceno/Vault/linux_back/metadata']
 
 #TODO: Implement path aware datastore distribuition

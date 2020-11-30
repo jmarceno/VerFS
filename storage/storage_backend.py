@@ -15,7 +15,7 @@ confs = load_configuration()
 mean_blk_size = confs['mean_blk_size']
 backend = confs['backend']
 write_spread = confs['write_spread']
-
+replicate_data = confs['replicate_data']
 '''
 Implementing a new store backend, requires:
 1. Add a new file to host its methods and add its call to the generic functions below
@@ -35,10 +35,16 @@ def commit_data(q:QueuedWrite, datastore:list, free_blocks:IOBTree, fragmentatio
     if backend == 'mmap' or backend == None:
         written, q, datastore, free_blocks, fragmentation = mm_commit(q, datastore, free_blocks, fragmentation)
 
+        if replicate_data:
+            replication()
+
         return written, q, datastore, free_blocks, fragmentation
     
     elif backend == 'rocksdb':
         written, q, datastore, free_blocks, fragmentation = rocksdb_commit(q, datastore, free_blocks, fragmentation)
+
+        if replicate_data:
+            replication()
 
         return written, q, datastore, free_blocks, fragmentation
 
@@ -48,3 +54,6 @@ def read_data(hash:str, offset:int, ds:DataStore, read_size:int, hashtable:HashT
         return mm_read(hash, offset, ds, read_size, hashtable)
     elif backend == 'rocksdb':
         return rocksdb_read(hash, offset, ds, read_size, hashtable)
+
+def replication():
+    raise NotImplementedError
