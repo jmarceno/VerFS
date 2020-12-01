@@ -1,6 +1,5 @@
 from collections import deque
 from queue import Queue
-from FileQueue import *
 
 from math import ceil
 from cache import LRU
@@ -27,7 +26,6 @@ gc_interval = confs['gc_interval']
 dirs = {}
 write_read_cache = {}
 write_buffer_size = confs['write_buffer_size']
-# write_buffer = filequeue.FileQueue(20000)
 write_buffer = deque() #Queue(confs['write_buffer_size']) # TODO: Create a memory mapped version of the FileQueue library and use here
 
 read_cache = LRU(maxlen=confs['cache_size'])

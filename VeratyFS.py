@@ -29,7 +29,7 @@ import random
 # if (os.path.exists(os.path.join(basedir, 'setup.py')) and
 #     os.path.exists(os.path.join(basedir, 'src', 'pyfuse3.pyx'))):
 #     sys.path.insert(0, os.path.join(basedir, 'src'))
-
+import gc
 import time
 import copy
 import errno
@@ -113,7 +113,7 @@ class Operations(pyfuse3.Operations):
         self.locked = False  # Write lock to prevent to many write threads to wait in line
         
         self.inode_open_count = defaultdict(int)
-        self.stat_msg_queue = stat_msg_queue        
+        self.stat_msg_queue = stat_msg_queue  
         self.inodes = FSMeta()
                 
         if len(self.inodes) == 0:
@@ -757,7 +757,10 @@ class Operations(pyfuse3.Operations):
         '''
         #TODO: Make threads report back to raise events like no space on disk
 
+        # await trio.to_thread.run_sync(write_new_blocks, write_buffer, resq, self.stat_msg_queue)
+        
         # write_new_blocks(write_buffer, resq, self.stat_msg_queue)
+        
         for idx, w in enumerate(self.writers):
             if not w.is_alive():
                 self.writers.pop(idx)
@@ -809,7 +812,7 @@ class Operations(pyfuse3.Operations):
         return True
 
     # @profile
-    async def write(self, fh, offset, buf):
+    async def write(self, fh, offset, buf):        
         f = self.inodes[fh]
         
         end_offset = offset + len(buf)            
@@ -846,8 +849,11 @@ class Operations(pyfuse3.Operations):
 
         f.mtime_ns = time.time_ns()
         self.inodes[fh] = f
-        
-        return len(buf)
+
+        if len(write_buffer) >= write_buffer_size/2 and len(self.writers) < max_write_workers:
+            await self.flush(fh)
+                
+        return len(buf)       
 
 '''
 
@@ -1019,7 +1025,7 @@ def write_new_blocks(_queued_writes, resq, stat_msg_queue):
     global free_blocks    
     global hash_table
     global fragmentation
-        
+    
     registers_processed = 0
     bytes_processed = 0
     writing = True    
@@ -1027,7 +1033,7 @@ def write_new_blocks(_queued_writes, resq, stat_msg_queue):
     
     while writing:# not _queued_writes.empty(): #writing
         try:
-            q = _queued_writes.popleft()
+            q = _queued_writes.popleft()            
             # q = _queued_writes.get_nowait()
             try:
                 if backend != 'rocksdb' and len(q['compressed_data']) <= small_block_limit:
@@ -1086,8 +1092,9 @@ def write_new_blocks(_queued_writes, resq, stat_msg_queue):
             except Exception:
                 LogEvent(("ERROR",traceback.format_exc()))
 
-        except IndexError:
-            writing = False
+        except IndexError:    
+            writing = False            
+            gc.collect()
     
     if backend == 'mmap':
         for ds in datastore:
@@ -1108,8 +1115,8 @@ async def dedup(data, stat_msg_queue):
     start_time = time.time()
     bytes_processed = 0
 
-    while len(write_buffer) >= write_buffer_size:
-        await trio.sleep(0.001)
+    # if len(write_buffer) >= write_buffer_size:
+    #     await trio.sleep(0.1)
 
     if type(data) != memoryview:
         data = bytearray(data) # memoryview(data)
@@ -1192,7 +1199,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
     global read_cache
 
     data = bytearray()
-
+        
     for b in blklst[start_block:end_block+1]:
 
         d = seek_in_cache(b.hash)
@@ -1229,7 +1236,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
         if d is not None and b.hash == hash_data(d):            
             read_cache[b.hash] = d
             # TODO: This is slow. To improve, store parts in a list and use join
-            data += d
+            data = data + d
 
         else:
             if d is None:
@@ -1416,3 +1423,4 @@ if __name__ == '__main__':
         stat_sender.terminate()
         stat_sender.join(10)
         stat_sender.kill()
+        sys.exit(1)

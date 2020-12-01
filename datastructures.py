@@ -4,6 +4,8 @@ import time
 from compression import compress_data
 import mmap
 import traceback
+from utils import datastore_opt
+import rocksdb
 
 class Garbage_Collector:
     def __init__(self):
@@ -25,6 +27,9 @@ class DataStore:
         else:
             self.IS_FULL = False
     
+    def reconnect_db(self):
+        self.db = rocksdb.DB(self.path, datastore_opt())
+
     '''
     Commit the next wwrite position to disk
     Only applies to mmap backend
