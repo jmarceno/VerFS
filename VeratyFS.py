@@ -118,12 +118,17 @@ class Operations(pyfuse3.Operations):
                 
         if len(self.inodes) == 0:
             self.init_file_system()
-
         
         self.services = []
-        self.services.append(threading.Thread(target=persist, args=(self.stat_msg_queue,), daemon=True).start())
-        self.services.append(threading.Thread(target=usage, args=(self.stat_msg_queue,), daemon=True).start())
+        p = threading.Thread(target=persist, args=(self.stat_msg_queue,), daemon=True)
+        u = threading.Thread(target=usage, args=(self.stat_msg_queue,), daemon=True)
+        p.start()
+        u.start()
+        self.services.append(p)
+        self.services.append(u)
         
+        self.writers = []
+
         # if replicate_data and (replication_type == 'async' or replication_type == 'batch'):
         #     self.services.append(mp.Process(target=, args=(self.stat_msg_queue, )))
 
@@ -751,10 +756,18 @@ class Operations(pyfuse3.Operations):
         has been duplicated).
         '''
         #TODO: Make threads report back to raise events like no space on disk
-        if threading.active_count() <= max_write_workers:
-            threading.Thread(target=write_new_blocks, args=(write_buffer, resq, self.stat_msg_queue,)).start()
-            await self.inodes.commit()
+
+        # write_new_blocks(write_buffer, resq, self.stat_msg_queue)
+        for idx, w in enumerate(self.writers):
+            if not w.is_alive():
+                self.writers.pop(idx)
+
+        if len(self.writers) <= max_write_workers:
+            t = threading.Thread(target=write_new_blocks, args=(write_buffer, resq, self.stat_msg_queue,))
+            t.start()
+            self.writers.append(t)
         
+        await self.inodes.commit()        
         return 0
 
 
@@ -835,7 +848,6 @@ class Operations(pyfuse3.Operations):
         self.inodes[fh] = f
         
         return len(buf)
-
 
 '''
 
@@ -1013,9 +1025,10 @@ def write_new_blocks(_queued_writes, resq, stat_msg_queue):
     writing = True    
     start_time = time.time()
     
-    while writing:
-        try:            
-            q = _queued_writes.popleft()        
+    while writing:# not _queued_writes.empty(): #writing
+        try:
+            q = _queued_writes.popleft()
+            # q = _queued_writes.get_nowait()
             try:
                 if backend != 'rocksdb' and len(q['compressed_data']) <= small_block_limit:
                     if q['compressed']:                            
@@ -1095,8 +1108,11 @@ async def dedup(data, stat_msg_queue):
     start_time = time.time()
     bytes_processed = 0
 
+    while len(write_buffer) >= write_buffer_size:
+        await trio.sleep(0.001)
+
     if type(data) != memoryview:
-        data = memoryview(data)
+        data = bytearray(data) # memoryview(data)
         
         if backend != 'rocksdb' and len(data) <= min_blk_size:
             _hashed_data = hash_data(data)
@@ -1106,12 +1122,13 @@ async def dedup(data, stat_msg_queue):
                 read_cache[_hashed_data] = data
                 update_index(_hashed_data)                
             else:
-                q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': data, 'result': False}
+                q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': bytearray(data), 'result': False}
                 q['compressed'], q['compressed_data'] = False, q['data'] #await compress_data(q['data'])
                 q['creation_time'] = time.time()                                
                 blk_list[q['idx']] = FileBlock(_hashed_data, len(q['compressed_data']), len(q['data']))
                 write_read_cache[_hashed_data] = data
                 write_buffer.append(q)
+                # write_buffer.put(q, block=True)
 
                 '''
                 Creates the HashTable entry in advance, so we can identify duplicated data before
@@ -1136,12 +1153,14 @@ async def dedup(data, stat_msg_queue):
                     update_index(c.hash)
                 else:
 
-                    q = {'idx':len(blk_list)-1, 'hash':c.hash, 'data': c.data, 'result': False}
+                    q = {'idx':len(blk_list)-1, 'hash':c.hash, 'data': bytearray(c.data), 'result': False}
                     q['compressed'], q['compressed_data'] = await compress_data(q['data'])
                     q['creation_time'] = time.time()                    
                     blk_list[q['idx']] = FileBlock(c.hash, len(q['compressed_data']), len(q['data']))
                     write_read_cache[c.hash] = c.data
                     write_buffer.append(q)
+                    # write_buffer.put(q, block=True)
+
 
                     '''
                     Creates the HashTable entry in advance, so we can identify duplicated data before
@@ -1209,6 +1228,7 @@ def get_file_data(stat_msg_queue, blklst, start_block=None, end_block=None, offs
 
         if d is not None and b.hash == hash_data(d):            
             read_cache[b.hash] = d
+            # TODO: This is slow. To improve, store parts in a list and use join
             data += d
 
         else:
@@ -1253,6 +1273,11 @@ def chunks(lst, n):
 async def variable_chunks(data):
     return await hashed_chunks(data)
 
+'''
+Return how much of the memory allowance in being used in % fom 0 - 100
+'''
+def percent_used_mem() -> float:
+    return (virtual_memory().used / max_memory_allowance)*100
 
 def persist(stat_msg_queue):
    
@@ -1287,14 +1312,9 @@ def usage(stat_msg_queue):
         # prof.dump_stats('get_file_data.lprof')
         # print(".")
 
-
 '''
-
 CODE INITIALIZATION AND RUN
-
 '''
-
-
 def init_logging(debug=False):
     formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(threadName)s: '
                                   '[%(name)s] %(message)s', datefmt="%Y-%m-%d %H:%M:%S")

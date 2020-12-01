@@ -1,4 +1,7 @@
 from collections import deque
+from queue import Queue
+from FileQueue import *
+
 from math import ceil
 from cache import LRU
 from compression import compressed_pickle, decompress_pickle, decompress_data, compress_data
@@ -23,8 +26,9 @@ gc_interval = confs['gc_interval']
 
 dirs = {}
 write_read_cache = {}
-write_buffer = deque()
-
+write_buffer_size = confs['write_buffer_size']
+# write_buffer = filequeue.FileQueue(20000)
+write_buffer = deque() #Queue(confs['write_buffer_size']) # TODO: Create a memory mapped version of the FileQueue library and use here
 
 read_cache = LRU(maxlen=confs['cache_size'])
 small_block_read_cache =LRU(maxlen=confs['small_block_cache_size'])
@@ -58,10 +62,12 @@ datastore_chunks = list(range(0, datastore_chunks_number))
 mirror_datastore_chunks = list(range(0, mirror_datastore_chunks_number))
 
 identity_string = confs['identity_string']
-max_write_workers = confs['max_write_workers'] + 9 # 9 is the number of threads that are constantly running without consider the write threads
+max_write_workers = confs['max_write_workers'] # 9 is the number of threads that are constantly running without consider the write threads
 q_random = confs['q_random'] # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue
 
 backend = confs['backend']
 write_spread = confs['write_spread']
 replicate_data = confs['replicate_data']
 replication_type = confs['replication_type'].lower()
+
+max_memory_allowance = confs['max_memory_allowance']*1073741824

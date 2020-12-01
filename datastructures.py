@@ -24,8 +24,11 @@ class DataStore:
             self.IS_FULL = True
         else:
             self.IS_FULL = False
-
     
+    '''
+    Commit the next wwrite position to disk
+    Only applies to mmap backend
+    '''
     def commit_next_write_position(self):
         with open(self.path, "r+b") as f:
             try:

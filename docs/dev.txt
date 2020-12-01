@@ -12,3 +12,13 @@ SysBench
 sysbench --num-threads=16 --test=fileio --file-total-size=3G --file-test-mode=rndrw prepare
 sysbench --num-threads=16 --test=fileio --file-total-size=3G --file-test-mode=rndrw run
 sysbench --num-threads=16 --test=fileio --file-total-size=3G --file-test-mode=rndrw cleanup
+
+
+copy big
+/run/media/jmarceno/Vault/Games/RetroGaming/Roms/Apple II
+/run/media/jmarceno/Vault/Games/RetroGaming/Roms/Atari 2600
+/run/media/jmarceno/Vault/Games/RetroGaming/Roms/Nintendo - Game Boy Advance
+/run/media/jmarceno/Vault/Games/RetroGaming/Roms/Nintendo - Super Nintendo Entertainment System
+/run/media/jmarceno/Vault/Games/RetroGaming/Roms/SNK Neo Geo CD
+/run/media/jmarceno/Vault/Games/RetroGaming/Roms/Sony Playstation
+/run/media/jmarceno/Vault/Games/RetroGaming/Roms/Taito Type X
