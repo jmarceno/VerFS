@@ -129,6 +129,11 @@ class Operations(pyfuse3.Operations):
         
         self.writers = []
 
+        for i in range(0, max_write_workers):
+            t = threading.Thread(target=write_new_blocks, args=(self.stat_msg_queue, True))
+            t.start()
+            self.writers.append(t)
+
         # if replicate_data and (replication_type == 'async' or replication_type == 'batch'):
         #     self.services.append(mp.Process(target=, args=(self.stat_msg_queue, )))
 
@@ -757,16 +762,16 @@ class Operations(pyfuse3.Operations):
         '''
         #TODO: Make threads report back to raise events like no space on disk
 
-        await trio.to_thread.run_sync(write_new_blocks, write_buffer, self.stat_msg_queue)
+        # await trio.to_thread.run_sync(write_new_blocks, self.stat_msg_queue, False)
         
-        # write_new_blocks(write_buffer, self.stat_msg_queue)
+        # write_new_blocks(self.stat_msg_queue, False)
         
         # for idx, w in enumerate(self.writers):
         #     if not w.is_alive():
         #         self.writers.pop(idx)
 
         # if len(self.writers) <= max_write_workers:
-        #     t = threading.Thread(target=write_new_blocks, args=(write_buffer, self.stat_msg_queue,))
+        #     t = threading.Thread(target=write_new_blocks, args=(self.stat_msg_queue, False,))
         #     t.start()
         #     self.writers.append(t)
 
@@ -1014,7 +1019,7 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
 
 
 # @profile
-def write_new_blocks(_queued_writes, stat_msg_queue):
+def write_new_blocks(stat_msg_queue:Queue, daemon:bool):
     '''
     Writes a series of blocks that where quede
 
@@ -1034,9 +1039,9 @@ def write_new_blocks(_queued_writes, stat_msg_queue):
     start_time = time.time()
     
     while writing:# not _queued_writes.empty(): #writing
-        try:
-            q = _queued_writes.popleft()            
-            # q = _queued_writes.get_nowait()
+        try:            
+            q = write_buffer.popleft()
+            
             try:
                 if backend != 'rocksdb' and len(q['compressed_data']) <= small_block_limit:
                     if q['compressed']:                            
@@ -1060,8 +1065,6 @@ def write_new_blocks(_queued_writes, stat_msg_queue):
                         stat_msg_queue.put_nowait({'DEBUG' : "Error writing data to disk"})                            
                         LogEvent(("ERROR",traceback.format_exc()))
                         raise FUSEError(errno.ENOSPC)
-                        # raise FUSEError(errno.EIO)
-                    
                 try:                    
                     del write_read_cache[q['hash']]                    
                 except KeyError:
@@ -1094,8 +1097,12 @@ def write_new_blocks(_queued_writes, stat_msg_queue):
             except Exception:
                 LogEvent(("ERROR",traceback.format_exc()))
 
-        except IndexError:    
-            writing = False
+        except IndexError:
+            if not daemon:  
+                writing = False
+            else:
+                time.sleep(1)
+                continue
     
     if backend == 'mmap':
         for ds in datastore:
@@ -1105,7 +1112,7 @@ def write_new_blocks(_queued_writes, stat_msg_queue):
 
 
 # @profile
-async def dedup(data, stat_msg_queue):        
+async def dedup(data, stat_msg_queue):
     global hash_table    
     global read_cache
     global write_buffer
@@ -1117,8 +1124,8 @@ async def dedup(data, stat_msg_queue):
     bytes_processed = 0
 
     # Trigger when the buffer gets full
-    if len(write_buffer) >= write_buffer_size:
-        await trio.to_thread.run_sync(write_new_blocks, write_buffer, stat_msg_queue)
+    # if len(write_buffer) >= write_buffer_size:
+    #     await trio.to_thread.run_sync(write_new_blocks, stat_msg_queue, False)
     #     # Basically stalls the code execution until the buffer get back the some manageable number
     #     while len(write_buffer) > write_buffer_size // 2:
     #         await trio.sleep(0.001)
