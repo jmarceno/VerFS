@@ -9,6 +9,9 @@ import traceback
 import os
 from shutil import copyfile
 from logger import LogEvent
+from utils import load_configuration
+
+confs = load_configuration()
 
 lzma_filters = [
     {"id": lzma.FILTER_DELTA, "dist": 5},
@@ -17,7 +20,7 @@ lzma_filters = [
 
 zlib_compression_level = 6
 bz2_compression_level = 1
-lz4_compression_level = 1 # frame.COMPRESSIONLEVEL_MINHC
+lz4_compression_level = confs['compression_level'] # frame.COMPRESSIONLEVEL_MINHC
 
 
 # Pickle a file and then compress it into a file with extension

@@ -84,7 +84,9 @@ write_spread: True
 # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue
 q_random : 2
 
+# Address and Port of the web interface service
 web_interface : 'localhost:5555'
+# Location of the log file
 log_file : /home/jmarceno/metadata/logs.txt
 
 # Storage Backend for data persistance
@@ -100,3 +102,10 @@ max_write_workers: 30
 # TODO: Implment memory limitation
 # Max memory that the system is allowed to use in GB
 max_memory_allowance: 10 
+
+# Level of compression applied to individual blocks
+# from 0 (disabled) to 15 (heavy compression)
+# RECOMMENDED -> 1 (as it provides some compression without any noticiable slowdown)
+# Compression algorithm here is lz4
+# Please note that changes here can *heavily* impact read and write performance
+compression_level: 1
