@@ -1101,12 +1101,13 @@ def write_new_blocks(stat_msg_queue:Queue, daemon:bool):
             if not daemon:  
                 writing = False
             else:
-                time.sleep(1)
+                if backend == 'mmap':
+                    for ds in datastore:
+                        ds.commit_next_write_position()            
+                
+                time.sleep(2)
                 continue
-    
-    if backend == 'mmap':
-        for ds in datastore:
-            ds.commit_next_write_position()
+       
 
     hash_table.commit()
 
@@ -1122,20 +1123,6 @@ async def dedup(data, stat_msg_queue):
 
     start_time = time.time()
     bytes_processed = 0
-
-    # Trigger when the buffer gets full
-    # if len(write_buffer) >= write_buffer_size:
-    #     await trio.to_thread.run_sync(write_new_blocks, stat_msg_queue, False)
-    #     # Basically stalls the code execution until the buffer get back the some manageable number
-    #     while len(write_buffer) > write_buffer_size // 2:
-    #         await trio.sleep(0.001)
-    #     gc.collect()
-        
-        # if write_buffer == 0:
-        #     write_buffer = deque()
-        #     gc.collect()
-        # else:
-        #     print("Deu chabu...why are we here???")
 
 
     if type(data) != memoryview:

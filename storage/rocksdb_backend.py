@@ -77,15 +77,8 @@ def rocksdb_commit(q:QueuedWrite, datastore:list, mirror_datastore:list, free_bl
     
     write_data(q, datastore, data)
 
-    if replication:
-        if replication_type == 'sync':
-            write_data(q, mirror_datastore, data, replica=True)
-        
-        elif replication_type == 'async':
-            pass
-
-        elif replication_type == 'batch':
-            pass
+    if replication:        
+        write_data(q, mirror_datastore, data, replica=True)        
     
     return written, q, datastore, mirror_datastore, free_blocks, fragmentation
 
