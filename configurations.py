@@ -59,13 +59,11 @@ datastore_base_path = confs['datastore_base_path']
 datastore_chunks = list(range(0, datastore_chunks_number))
 mirror_datastore_chunks = list(range(0, mirror_datastore_chunks_number))
 
-identity_string = confs['identity_string']
 max_write_workers = confs['max_write_workers'] # 9 is the number of threads that are constantly running without consider the write threads
 q_random = confs['q_random'] # Maximum number of the random range to the tested against to decided if one of the spammy messages will make to the queue
 
 backend = confs['backend']
 write_spread = confs['write_spread']
 replicate_data = confs['replicate_data']
-replication_type = confs['replication_type'].lower()
 
 max_memory_allowance = confs['max_memory_allowance']*1073741824

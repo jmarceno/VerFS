@@ -18,9 +18,9 @@ from .util import fuse_test_marker, wait_for_mount, umount, cleanup
 
 basename = os.path.join(os.path.dirname(__file__), '..')
 # TEST_FILE = __file__
-TEST_FILE = os.path.join(os.getcwd(), "tests","test_file.csv")
+# TEST_FILE = os.path.join(os.getcwd(), "tests","test_file.csv")
 # TEST_FILE = os.path.join(os.getcwd(), "tests","test_file_medium.zip")
-# TEST_FILE = os.path.join(os.getcwd(), "tests","test_file_big.zip")
+TEST_FILE = os.path.join(os.getcwd(), "tests","test_file_big.zip")
 
 
 

@@ -15,7 +15,6 @@ from utils import load_configuration, datastore_opt, get_dir_size, opt
 
 confs = load_configuration()
 write_spread = confs['write_spread']
-replication_type = confs['replication_type'].lower()
 replication = confs['replicate_data']
 
 #TODO: Change writes to be done in batches. How to do that for various databases
@@ -86,12 +85,14 @@ def rocksdb_commit(q:QueuedWrite, datastore:list, mirror_datastore:list, free_bl
 def rocksdb_read(_hash:str, _block:int, datastore:DataStore, read_size:int, hash_table:HashTable):   
     try:
         data = datastore.db.get(_hash.encode())
-        
-        if hash_table[_hash].compressed:
-            return decompress_data(data)
-                # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
+        if data is not None:        
+            if hash_table[_hash].compressed:
+                return decompress_data(data)
+                    # check if the data has been compressed or not. If it was, decompress it, otherwise return data as read
+            else:
+                return data
         else:
-            return data        
+            raise IOError       
     except:
         LogEvent(("ERROR",traceback.format_exc()))
         return bytes(0)
