@@ -97,12 +97,12 @@ def datastore_opt():
     opts = rocksdb.Options()
     opts.create_if_missing = True
     opts.max_open_files = 3000
-    opts.write_buffer_size = (1 * (1024 ** 3))
+    opts.write_buffer_size = (0.2 * (1024 ** 3))
     opts.max_write_buffer_number = 5
-    opts.target_file_size_base = (128 * (1024 ** 2))
+    opts.target_file_size_base = (1024 * (1024 ** 2))
     opts.compression = rocksdb.CompressionType.no_compression
     # opts.delete_obsolete_files_period_micros = 1000000 * 60
-    opts.keep_log_file_num = 2
+    opts.keep_log_file_num = 1
     # opts.allow_mmap_reads = True
     # opts.allow_mmap_writes = True
     # opts.manual_wal_flush = True # TODO: RE-ENABLE THIS AS IT GIVES GOOD PERFORMANCE IMPROVEMENT. TAKE CARE TO **MANUALLY** FLUSH ALL DATA
@@ -116,17 +116,17 @@ def datastore_opt():
     opts.level_compaction_dynamic_level_bytes = True
     opts.max_background_compactions = 10
     opts.max_background_flushes = 6
-    opts.bytes_per_sync = 1048576*1
+    opts.bytes_per_sync = 1048576*10
     opts.compaction_pri = rocksdb.CompactionPri().min_overlapping_ratio
     
     
     opts.table_factory = rocksdb.BlockBasedTableFactory(
     checksum='xxhash',
     filter_policy=rocksdb.BloomFilterPolicy(10),
-    block_cache=rocksdb.LRUCache(0.2 * (1024 ** 3)),
-    block_size=(256)*1024,
-    block_cache_compressed=rocksdb.LRUCache(0.2 * (1024 ** 3)),
-    cache_index_and_filter_blocks=True)
+    block_cache=rocksdb.LRUCache(0 * (1024 ** 3)),
+    block_size=(1024)*1024,
+    block_cache_compressed=rocksdb.LRUCache(0 * (1024 ** 3)),
+    cache_index_and_filter_blocks=False)
 
     return opts
 

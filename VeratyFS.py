@@ -79,10 +79,6 @@ else:
 
 log = logging.getLogger()
 
-wq = mp.Queue() # Fila de mensagens a serem escritas no disco TODO: REMOVE IN THE FUTURE
-resq = mp.Queue() # Fila com as respostas das mensagens escritas - TODO:REMOVE IN THE FUTURE
-swq = mp.Queue() # Fila de escrita de blocos pequenos, estes nao tem fila de retorno TODO: REMOVE DEPRECATED
-
 # if replicate_data and (replication_type == 'async' or replication_type == 'batch'):
 #     mirror_queue = mp.Queue()
 
@@ -96,7 +92,11 @@ cache_misses = 0
 '''
 Maintain track of the program state. When it is set to false, the auxiliary/service threads are all finish the execution
 '''
-RUNNING = True 
+RUNNING = True
+# Indicates that the write_buffer is full and writes are not being processed anymore (See @dedup)
+STALLED = False
+# An empty buffer that will replace the write_buffer after its exaustion in consequence of a stall
+TEMP_WRITE_BUFFER = deque()
 
 class Operations(pyfuse3.Operations):
     '''
@@ -757,20 +757,22 @@ class Operations(pyfuse3.Operations):
         '''
         #TODO: Make threads report back to raise events like no space on disk
 
-        # await trio.to_thread.run_sync(write_new_blocks, write_buffer, resq, self.stat_msg_queue)
+        await trio.to_thread.run_sync(write_new_blocks, write_buffer, self.stat_msg_queue)
         
-        # write_new_blocks(write_buffer, resq, self.stat_msg_queue)
+        # write_new_blocks(write_buffer, self.stat_msg_queue)
         
-        for idx, w in enumerate(self.writers):
-            if not w.is_alive():
-                self.writers.pop(idx)
+        # for idx, w in enumerate(self.writers):
+        #     if not w.is_alive():
+        #         self.writers.pop(idx)
 
-        if len(self.writers) <= max_write_workers:
-            t = threading.Thread(target=write_new_blocks, args=(write_buffer, resq, self.stat_msg_queue,))
-            t.start()
-            self.writers.append(t)
+        # if len(self.writers) <= max_write_workers:
+        #     t = threading.Thread(target=write_new_blocks, args=(write_buffer, self.stat_msg_queue,))
+        #     t.start()
+        #     self.writers.append(t)
+
         
-        await self.inodes.commit()        
+        await self.inodes.commit()
+        
         return 0
 
 
@@ -1012,7 +1014,7 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
 
 
 # @profile
-def write_new_blocks(_queued_writes, resq, stat_msg_queue):
+def write_new_blocks(_queued_writes, stat_msg_queue):
     '''
     Writes a series of blocks that where quede
 
@@ -1093,8 +1095,7 @@ def write_new_blocks(_queued_writes, resq, stat_msg_queue):
                 LogEvent(("ERROR",traceback.format_exc()))
 
         except IndexError:    
-            writing = False            
-            gc.collect()
+            writing = False
     
     if backend == 'mmap':
         for ds in datastore:
@@ -1115,8 +1116,20 @@ async def dedup(data, stat_msg_queue):
     start_time = time.time()
     bytes_processed = 0
 
-    # if len(write_buffer) >= write_buffer_size:
-    #     await trio.sleep(0.1)
+    # Trigger when the buffer gets full
+    if len(write_buffer) >= write_buffer_size:
+        await trio.to_thread.run_sync(write_new_blocks, write_buffer, stat_msg_queue)
+    #     # Basically stalls the code execution until the buffer get back the some manageable number
+    #     while len(write_buffer) > write_buffer_size // 2:
+    #         await trio.sleep(0.001)
+    #     gc.collect()
+        
+        # if write_buffer == 0:
+        #     write_buffer = deque()
+        #     gc.collect()
+        # else:
+        #     print("Deu chabu...why are we here???")
+
 
     if type(data) != memoryview:
         data = bytearray(data) # memoryview(data)
@@ -1167,7 +1180,6 @@ async def dedup(data, stat_msg_queue):
                     write_read_cache[c.hash] = c.data
                     write_buffer.append(q)
                     # write_buffer.put(q, block=True)
-
 
                     '''
                     Creates the HashTable entry in advance, so we can identify duplicated data before
@@ -1423,4 +1435,4 @@ if __name__ == '__main__':
         stat_sender.terminate()
         stat_sender.join(10)
         stat_sender.kill()
-        sys.exit(1)
+        

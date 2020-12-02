@@ -20,7 +20,7 @@ class DataStore:
         self.path = _path
         self.next_write_position = _next_write_position
         self.LOCKED = False
-        self.db = db
+        self.db = db        
 
         if self.next_write_position + (1024*1024) > self.size:
             self.IS_FULL = True
