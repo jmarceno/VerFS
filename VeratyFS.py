@@ -130,7 +130,7 @@ class Operations(pyfuse3.Operations):
         self.writers = []
 
         for i in range(0, max_write_workers):
-            t = threading.Thread(target=write_new_blocks, args=(self.stat_msg_queue, True))
+            t = threading.Thread(target=write_new_blocks, args=(self.stat_msg_queue, True), daemon=True)
             t.start()
             self.writers.append(t)
 
