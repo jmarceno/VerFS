@@ -5,11 +5,10 @@ import zlib
 from lz4 import frame
 import _pickle as cPickle
 from _bz2 import BZ2Decompressor
-import struct
 import traceback
-from copy import deepcopy
 import os
 from shutil import copyfile
+from logger import LogEvent
 
 lzma_filters = [
     {"id": lzma.FILTER_DELTA, "dist": 5},
@@ -19,8 +18,6 @@ lzma_filters = [
 zlib_compression_level = 6
 bz2_compression_level = 1
 lz4_compression_level = 1 # frame.COMPRESSIONLEVEL_MINHC
-
-compression_trigger = 0.8  # How much the data has to be compressed for it to be worth. Rates below that will cause the data to not be compressed
 
 
 # Pickle a file and then compress it into a file with extension
@@ -51,6 +48,7 @@ def compressed_pickle(path, data, format=4, stat_msg_queue=None):
                 cPickle.dump(n_data, f)
                 return True
         except RuntimeError:
+            LogEvent(("ERROR","Error compressing file at @compressed_pickle"))
             return False
         
     elif format == 2:
@@ -106,10 +104,8 @@ async def compress_data(data, _format=1, stat_msg_queue=None):
     if _format == 1:
         cp_data = frame.compress(data, compression_level=lz4_compression_level)
         if len(cp_data) < len(data):
-            # if len(cp_data) / len(data) < compression_trigger:                
             return True, cp_data
-            # else:
-            #     return False, data
+            
         else:
             return False, data
     elif _format == 2:
