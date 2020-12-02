@@ -857,8 +857,8 @@ class Operations(pyfuse3.Operations):
         f.mtime_ns = time.time_ns()
         self.inodes[fh] = f
 
-        if len(write_buffer) >= write_buffer_size/2 and len(self.writers) < max_write_workers:
-            await self.flush(fh)
+        # if len(write_buffer) >= write_buffer_size/2 and len(self.writers) < max_write_workers:
+        #     await self.flush(fh)
                 
         return len(buf)       
 
@@ -1141,7 +1141,7 @@ async def dedup(data, stat_msg_queue):
                 q['creation_time'] = time.time()                                
                 blk_list[q['idx']] = FileBlock(_hashed_data, len(q['compressed_data']), len(q['data']))
                 write_read_cache[_hashed_data] = data
-                write_buffer.append(q)
+                await write_buffer.append(q)
                 # write_buffer.put(q, block=True)
 
                 '''
@@ -1172,7 +1172,7 @@ async def dedup(data, stat_msg_queue):
                     q['creation_time'] = time.time()                    
                     blk_list[q['idx']] = FileBlock(c.hash, len(q['compressed_data']), len(q['data']))
                     write_read_cache[c.hash] = c.data
-                    write_buffer.append(q)
+                    await write_buffer.append(q)
                     # write_buffer.put(q, block=True)
 
                     '''

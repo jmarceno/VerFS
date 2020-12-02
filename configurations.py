@@ -4,7 +4,7 @@ from queue import Queue
 from math import ceil
 from cache import LRU
 from compression import compressed_pickle, decompress_pickle, decompress_data, compress_data
-from datastructures import Garbage_Collector
+from datastructures import Garbage_Collector, WriteCache
 from hashtable import HashTable
 from utils import load_configuration
 
@@ -26,7 +26,7 @@ gc_interval = confs['gc_interval']
 dirs = {}
 write_read_cache = {}
 write_buffer_size = confs['write_buffer_size']
-write_buffer = deque() #Queue(confs['write_buffer_size']) # TODO: Create a memory mapped version of the FileQueue library and use here
+write_buffer = WriteCache(write_buffer_size) #deque() #Queue(confs['write_buffer_size']) # TODO: Create a memory mapped version of the FileQueue library and use here
 
 read_cache = LRU(maxlen=confs['cache_size'])
 small_block_read_cache =LRU(maxlen=confs['small_block_cache_size'])

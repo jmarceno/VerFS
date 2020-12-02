@@ -1,9 +1,12 @@
 from collections import deque
+from typing import Any
+import threading
 from logger import LogEvent
 import time
-from compression import compress_data
 import mmap
 import traceback
+import trio
+from compression import compress_data
 from utils import datastore_opt
 import rocksdb
 
@@ -124,3 +127,37 @@ class SmallBlock:
     
         if _size == _deflated_size:
             self.compressed = True
+
+
+class WriteCache():
+    def __init__(self, capacity:int) -> None:
+        self.d = deque()
+        self.capacity = capacity
+        self.lock = threading.Lock()
+
+    async def append(self, val:Any):
+        if not self.lock.locked():
+            if self.size() < self.capacity:
+                self.d.append(val)
+            else:
+                while self.size() >= self.capacity/10:
+                    await trio.sleep(3)
+                self.d.append(val)
+
+    def popleft(self) -> Any:
+        r = self.d.popleft()
+        # self.lock.acquire()
+        # if len(self.d) == 0:
+        #     del self.d
+        #     self.d = deque()
+        # self.lock.release()
+        return r           
+        
+
+    def size(self) -> int:
+        return len(self.d)
+
+    def __len__(self) -> int:
+        return len(self.d)
+
+    
