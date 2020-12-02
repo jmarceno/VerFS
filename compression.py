@@ -22,6 +22,7 @@ zlib_compression_level = 6
 bz2_compression_level = 1
 lz4_compression_level = confs['compression_level'] # frame.COMPRESSIONLEVEL_MINHC
 
+compression_trigger = 0.9
 
 # Pickle a file and then compress it into a file with extension
 def compressed_pickle(path, data, format=4, stat_msg_queue=None):
@@ -74,7 +75,6 @@ def compressed_pickle(path, data, format=4, stat_msg_queue=None):
 # Load any compressed pickle file
 def decompress_pickle(_file, format=4, stat_msg_queue=None):
     """
-
     :param file:
     :param format:
     :return: 1: Bzip2, 2:Zip, 3:Lzma, 4: No-Compression
@@ -91,17 +91,13 @@ def decompress_pickle(_file, format=4, stat_msg_queue=None):
         with open(_file, 'rb') as pickle_file:
             content = pickle.load(pickle_file)
             return content
-        # with open(_file, mode='rb') as f:
-        #     data = f.read()
-        #     return pickle.load(data)
-
+        
 
 async def compress_data(data, _format=1, stat_msg_queue=None):
     """
-
-    :param data:
-    :param _format:
-    :return: 1: lz4, 2:Zip, 3:Lzma, 4: bz2
+    :param data: data to be compressed
+    :param _format: Algorithm to be used for compression:  1-> lz4, 2 -> Zip, 3->Lzma, 4-> bz2
+    :return: Returns the compressed data if compression rate is above compression trigger, otherwise return the uncompressed data
     """
     _format = int(_format)
     if _format == 1:
@@ -125,7 +121,7 @@ async def compress_data(data, _format=1, stat_msg_queue=None):
                 return False, data
         except:
             return False, data
-        # return zlib.compress(data, zlib_compression_level)
+        
     elif _format == 3:
         return lzma.compress(data, filters=lzma_filters)
     elif _format == 4:
@@ -134,10 +130,9 @@ async def compress_data(data, _format=1, stat_msg_queue=None):
 
 def decompress_data(data, _format=1, stat_msg_queue=None):
     """
-
-    :param data:
-    :param _format:
-    :return: 1: lz4, 2:Zip, 3:Lzma, 4:BZip2
+    :param data: Compressed data (bytes) to be uncompressed
+    :param _format: 1: lz4, 2:Zip, 3:Lzma, 4:BZip2
+    :return: Returns the uncompresed data.
     """
     _format = int(_format)
     if _format == 1:
