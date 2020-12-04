@@ -34,7 +34,6 @@ import time
 import copy
 import errno
 import stat
-import mmap
 import traceback
 import threading
 from time import time
@@ -728,7 +727,8 @@ class Operations(pyfuse3.Operations):
         start_time = time.time()       
         
         data = await self.retrieve_data(fh, offset, length, whole=False)
-        self.stat_msg_queue.put({'INFO:ReadSpeed' : str(len(data)/ (time.time()- start_time))})
+        if random.randrange(0,q_random) == 0:
+            self.stat_msg_queue.put({'INFO:ReadSpeed' : str(len(data)/ (time.time()- start_time))})
 
         inode = self.inodes[fh]
         inode.atime_ns = time.time_ns()
@@ -819,7 +819,8 @@ class Operations(pyfuse3.Operations):
         return True
 
     # @profile
-    async def write(self, fh, offset, buf):        
+    async def write(self, fh, offset, buf):
+        buf = memoryview(buf)
         f = self.inodes[fh]
         
         end_offset = offset + len(buf)            
@@ -827,7 +828,7 @@ class Operations(pyfuse3.Operations):
         if len(f.data) != 0 and f.size != 0 and end_offset < f.size:
             try:                            
                 start_diff, start_block, end_block, data = await self.retrieve_data(fh, offset, len(buf), whole=True)
-                buf = bytearray(buf)
+                # buf = bytearray(buf)
                 
                 data[max(0,start_diff):end_offset-offset+max(0,start_diff)] = buf
                 new_data = await dedup(data, self.stat_msg_queue)                
@@ -881,11 +882,12 @@ def get_usage(stat_msg_queue):
     deduped_compressed = 0
     compression_rate = 0.0
 
+
     ht_copy = copy.copy(hash_table.d)
     for k in ht_copy:
         try:
-            if not hash_table[k].DELETED:
-                undeduped_uncompressed = undeduped_uncompressed + (ht_copy[k].uses * hash_table[k].deflated_size)
+            if not hash_table[k].DELETED:                
+                undeduped_uncompressed = undeduped_uncompressed + (max(0, ht_copy[k].uses) * hash_table[k].deflated_size)
                 undeduped_compressed = undeduped_compressed + (max(0, ht_copy[k].uses) * hash_table[k].size)
                 deduped_compressed = deduped_compressed + hash_table[k].size
         except KeyError:
@@ -895,13 +897,14 @@ def get_usage(stat_msg_queue):
     if undeduped_compressed != 0 and undeduped_uncompressed != 0:
         compression_rate = undeduped_compressed/undeduped_uncompressed
     
-    stat_msg_queue.put({'STAT:TOTAL_SIZE':partition_size_gb})
+    stat_msg_queue.put({'STAT:TOTAL_SIZE':partition_size_gb}) # This is reporting right
     stat_msg_queue.put({'STAT:Undeduped (No Compression) Space Used':undeduped_uncompressed})        
     stat_msg_queue.put({'STAT:Free Space': (max(0,(partition_size_gb - (deduped_compressed))))})
     stat_msg_queue.put({'STAT:Undeduped (Compression) Space Used':undeduped_compressed})
-    stat_msg_queue.put({'STAT:Deduped (Compression) Space Used':deduped_compressed})
+    stat_msg_queue.put({'STAT:Deduped (Compression) Space Used':deduped_compressed}) # This is reporting right
     stat_msg_queue.put({'STAT:Compression Rate':1 - compression_rate})
     stat_msg_queue.put({'STAT:Total Savings':(undeduped_uncompressed - undeduped_compressed)+(undeduped_uncompressed -deduped_compressed)})
+    # stat_msg_queue.put({'STAT:Total Savings':(undeduped_uncompressed - undeduped_compressed)})
     stat_msg_queue.put({'STAT:Fragmentation':max(0, fragmentation['free_size'])})
     stat_msg_queue.put({'STAT:Fragmented Blocks':fragmentation['free_count']})
     
@@ -915,12 +918,12 @@ def garbage_collector(stat_msg_queue):
     global datastore
     global mirror_datastore
     
-    try:        
-        while len(GC.add_uses) > 0:
-            add = GC.add_uses.popleft()
-            hash_table[add].uses = hash_table[add].uses + 1             
-    except IndexError:
-        pass
+    # try:        
+    #     while len(GC.add_uses) > 0:
+    #         add = GC.add_uses.popleft()
+    #         hash_table[add].uses = hash_table[add].uses + 1             
+    # except IndexError:
+    #     pass
 
     try:        
         while len(GC.remove_uses) > 0:
@@ -931,6 +934,10 @@ def garbage_collector(stat_msg_queue):
                 if hash_table[remove].DELETION_TIME is not None and time.time() - hash_table[remove].DELETION_TIME > 5:
                     if hash_table[remove].size <= small_block_limit:
                         r = delete_small_block(remove, mirror_datastore, stat_msg_queue)
+                        try:
+                            del small_block_read_cache[remove]
+                        except KeyError:
+                            pass
                         if not r:
                             LogEvent(("ERROR","DEBUG: Block could not be deleted. File "+ str(remove) +" is now orphan. Please manually delete."))                            
                     elif backend == 'rocksdb':
@@ -1007,7 +1014,7 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
                         pass                
             elif in_index:                
                 h = hash_table[idx]
-                h.uses = h.uses + 1
+                h.uses = h.uses - 1
                 hash_table[idx] = h                
         except Exception:
             LogEvent(("ERROR",traceback.format_exc()))            
@@ -1038,9 +1045,10 @@ def write_new_blocks(stat_msg_queue:Queue, daemon:bool):
     writing = True    
     start_time = time.time()
     
-    while writing:# not _queued_writes.empty(): #writing
+    while writing:# not _queued_writes.empty(): #writing        
+                
         try:            
-            q = write_buffer.popleft()
+            q = write_buffer.popleft()            
             
             try:
                 if backend != 'rocksdb' and len(q['compressed_data']) <= small_block_limit:
@@ -1052,15 +1060,14 @@ def write_new_blocks(stat_msg_queue:Queue, daemon:bool):
                         q['chunk'] = -1
                         q['block'] = -1
                         written = write_small_block(q['hash'], q['data'], mirror_datastore, stat_msg_queue)
-                    if random.randrange(0,10) == 0:
+                    if random.randrange(0,q_random) == 0:
                         stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})    
                 else:                        
                     try:                            
                         written, q, datastore, mirror_datastore, free_blocks, fragmentation = commit_data(q,datastore, mirror_datastore, free_blocks, fragmentation)
                         
-                        if random.randrange(0,10) == 0:
-                            stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})
-                        
+                        if random.randrange(0, q_random) == 0:
+                            stat_msg_queue.put_nowait({'INFO:WriteSpeed' : written/(time.time()-start_time)})                        
                     except:
                         stat_msg_queue.put_nowait({'DEBUG' : "Error writing data to disk"})                            
                         LogEvent(("ERROR",traceback.format_exc()))
@@ -1103,9 +1110,9 @@ def write_new_blocks(stat_msg_queue:Queue, daemon:bool):
             else:
                 if backend == 'mmap':
                     for ds in datastore:
-                        ds.commit_next_write_position()            
-                
-                time.sleep(2)
+                        ds.commit_next_write_position()
+                hash_table.commit()
+                time.sleep(0.001)
                 continue
        
 
@@ -1125,8 +1132,9 @@ async def dedup(data, stat_msg_queue):
     bytes_processed = 0
 
 
-    if type(data) != memoryview:
-        data = bytearray(data) # memoryview(data)
+    if type(data) is not None: #!= memoryview:
+        data = memoryview(data)
+        # data = bytearray(data)
         
         if backend != 'rocksdb' and len(data) <= min_blk_size:
             _hashed_data = hash_data(data)
@@ -1136,12 +1144,12 @@ async def dedup(data, stat_msg_queue):
                 read_cache[_hashed_data] = data
                 update_index(_hashed_data)                
             else:
-                q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': bytearray(data), 'result': False}
+                q = {'idx':len(blk_list)-1, 'hash':_hashed_data, 'data': data, 'result': False}
                 q['compressed'], q['compressed_data'] = False, q['data'] #await compress_data(q['data'])
                 q['creation_time'] = time.time()                                
                 blk_list[q['idx']] = FileBlock(_hashed_data, len(q['compressed_data']), len(q['data']))
                 write_read_cache[_hashed_data] = data
-                await write_buffer.append(q)
+                write_buffer.append(q)
                 # write_buffer.put(q, block=True)
 
                 '''
@@ -1167,12 +1175,12 @@ async def dedup(data, stat_msg_queue):
                     update_index(c.hash)
                 else:
 
-                    q = {'idx':len(blk_list)-1, 'hash':c.hash, 'data': bytearray(c.data), 'result': False}
+                    q = {'idx':len(blk_list)-1, 'hash':c.hash, 'data': c.data, 'result': False}
                     q['compressed'], q['compressed_data'] = await compress_data(q['data'])
                     q['creation_time'] = time.time()                    
                     blk_list[q['idx']] = FileBlock(c.hash, len(q['compressed_data']), len(q['data']))
                     write_read_cache[c.hash] = c.data
-                    await write_buffer.append(q)
+                    write_buffer.append(q)
                     # write_buffer.put(q, block=True)
 
                     '''
@@ -1192,7 +1200,7 @@ async def dedup(data, stat_msg_queue):
         LogEvent(("ERROR",traceback.format_exc()))
         raise ValueError
     
-    if random.randrange(0,10) == 1:
+    if random.randrange(0, q_random) == 1:
         stat_msg_queue.put({'INFO:DedupSpeed' : bytes_processed/ (time.time()- start_time)})   
     
     return blk_list
@@ -1312,13 +1320,13 @@ def usage(stat_msg_queue):
     while RUNNING:        
         if (time.time() - last_time > usage_interval):              
             get_usage(stat_msg_queue)
-            if randint(1, 5) == 1:
-                stat_msg_queue.put({'INFO:TOTAL_MEMORY': mem})
-                stat_msg_queue.put({'INFO:Memory (active in use)': unix_memory()})
-                stat_msg_queue.put({'INFO:Memory (resident)': resident()})
-                stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
-                stat_msg_queue.put({'INFO:CACHE HIT': cache_hits})
-                stat_msg_queue.put({'INFO:CACHE MISS': cache_misses})
+            # if randint(1, (q_random//2)) == 1:
+            stat_msg_queue.put({'INFO:TOTAL_MEMORY': mem})
+            stat_msg_queue.put({'INFO:Memory (active in use)': unix_memory()})
+            stat_msg_queue.put({'INFO:Memory (resident)': resident()})
+            stat_msg_queue.put({'INFO:Memory (stack size)': stacksize()})
+            stat_msg_queue.put({'INFO:CACHE HIT': cache_hits})
+            stat_msg_queue.put({'INFO:CACHE MISS': cache_misses})
                 
             last_time = time.time()
         time.sleep(3)

@@ -16,7 +16,7 @@ hash_table_path = confs['hash_table_path']
 class HashTable(MutableMapping):    
     def __init__(self, *a, **k):
         self.d = dict(*a, **k)
-        self.pending = {}        
+        # self.pending = {}        
         #Create HashTable directoty tree if it does no exist
         if not os.path.isdir(confs['hash_table_path']):
             os.makedirs(confs['hash_table_path'])
@@ -43,8 +43,8 @@ class HashTable(MutableMapping):
     def __getitem__(self, k):        
         if k in self.d:
             return self.d[k]
-        elif k in self.pending:
-            return self.pending[k]
+        # elif k in self.pending:
+        #     return self.pending[k]
         else:
             raise KeyError
     
@@ -55,17 +55,17 @@ class HashTable(MutableMapping):
         if self.remove_from_disk(k):
             del self.d[k]
 
-    def __setitem__(self, k, v):
+    def __setitem__(self, k, v):        
         self.d[k] = v
-        self.pending[k] = v
+        # self.pending[k] = v
 
         
     def commit(self):
         self.lock = True
         
-        cp = self.pending.copy()
-        self.pending = {}
-        
+        # cp = self.pending.copy()
+        # self.pending = {}
+        cp = self.d.copy()
         self.lock = False
         
         self.save_to_disk(cp)

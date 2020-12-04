@@ -11,10 +11,10 @@ small_block_cache_size : 1
 # Size of the system write buffer.
 # Bigger sizes consume more memory to speed-up writes.
 # Lower sizes sacrifices write speed for more reliability
-# Each entry accounts for around 400kb
-# It is important to note that if the disks can't keep up with the writes and this
+# It is important to note that if the disks can't keep up with the writes the
 # buffer gets full, writes will stall until the buffer is able to accept more data
-write_buffer_size: 30000
+# A *write_buffer* with size 16000, will consume around 3GB of memory if using 128 as *mean_blk_size* 
+write_buffer_size: 40000
 
 # TODO: Implment some kind write buffer overflow to disk
 # Location to store the write buffer overflow
@@ -26,18 +26,20 @@ write_ahead_cache_initial_size: 1073741824
 write_ahead_cache_max_size: 10737418240
 
 # Allocation unit that will be reported to the underlying OS and to be used to multiply the block sizes
-# *mean_blk_size*, *min_blk_size* and *max_blk_size* are here represented in KB if *allocation_unit* is 
-# kept at the default value *1024* which is recommended.
+# *mean_blk_size*, *min_blk_size*,  *max_blk_size* and *small_block_limit*, are here represented in KB if *allocation_unit* is 
+# kept at the default value of *1024*, which is strongly recommended.
 # Bigger blocks sizes, will allow for faster writes and reads, in detriment of data savings coming from
-# data deduplication, as bigger the blocks, harder is to find a corresponding duplicate
+# data deduplication, although bigger blocks can be compressed with a little more eficiency.
 allocation_unit : 1024
-mean_blk_size : 64
-# min_blk_size : 32 # Auto calculated by the system
-# max_blk_size : 512 # Auto calculated by the system
+mean_blk_size : 128
+# min_blk_size : # Auto calculated by the system
+# max_blk_size :  # Auto calculated by the system
+# (mmap backend only) Blocks below this size will be optimized by the system and store in 
+# a different format. Values above 8192 are not recomended and can cause significant system slowdown.
 small_block_limit : 8192
 
 partition_size : 80  # Partion size in GB
-chunk_size_per_GB : 10 # Tamanho de cada um dos chunks TODO: How does this handles fractions?
+chunk_size_per_GB : 20 # Tamanho de cada um dos chunks TODO: How does this handles fractions?
 
 # Location where the data will be stored
 # fs_meta_path, hash_table_path, free_blocks_path en gc_path are all metadata
@@ -76,7 +78,7 @@ hashtable_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata/mirro
 # although the system will work with any number of paths.
 # Note that *write spread* is applied here too
 # *mirror_chunk_size_per_GB* should be calculated with the same considerations of *chunk_size_per_gb*
-replicate_data: True
+replicate_data: False
 data_replication_path: ['/run/media/jmarceno/Vault/linux_back/metadata/replication']
 mirror_chunk_size_per_GB : 20
 
@@ -102,10 +104,10 @@ log_file : /home/jmarceno/metadata/logs.txt
 # 'rocksdb': (*RECOMMENDED*) Data will be stored into various rocksdb databases -> Not as fast as mmap but *safer* and does not suffer from fragmention
 backend: 'rocksdb'
 
-# Maximum number of write worker threads, responsible to flush data to disk
+# Maximum number of write worker threads (Responsible to flush data to disk)
 # Increase this number in line with the number of cores and disks that the system has access to
-# More disks == More write workers (2-10 per disk is recommended)
-max_write_workers: 30
+# More disks == More write workers (1-2 per disk is recommended not exceding the number of cores of the main server)
+max_write_workers: 40
 
 # TODO: Implment memory limitation
 # Max memory that the system is allowed to use in GB

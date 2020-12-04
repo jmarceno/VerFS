@@ -102,7 +102,7 @@ class Block:
         self.offset = 0  # Offset dentro do chunk        
         self.size = 0  # Tamanho depois da compressao
         self.deflated_size = 0  # Tamanho sem compressao
-        self.uses = 1
+        self.uses = 0
         self.compressed = False
         self.DELETED = False
         self.DELETION_TIME = None
@@ -120,7 +120,7 @@ class SmallBlock:
         self.hash = ""
         self.size = 0  # Tamanho depois da compressao
         self.deflated_size = 0  # Tamanho sem compressao
-        self.uses = 1
+        self.uses = 0
         self.compressed = False
         self.DELETED = False
         self.DELETION_TIME = str(time.time())
@@ -132,26 +132,18 @@ class SmallBlock:
 class WriteCache():
     def __init__(self, capacity:int) -> None:
         self.d = deque()
-        self.capacity = capacity
-        self.lock = threading.Lock()
+        self.capacity = capacity        
 
-    async def append(self, val:Any):
-        if not self.lock.locked():
-            if self.size() < self.capacity:
-                self.d.append(val)
-            else:
-                while self.size() >= self.capacity/10:
-                    await trio.sleep(3)
-                self.d.append(val)
+    def append(self, val:Any):                
+        if self.size() < self.capacity:
+            self.d.append(val)
+        else:
+            while self.size() >= self.capacity/2:
+                time.sleep(1)
+            self.d.append(val)
 
     def popleft(self) -> Any:
-        r = self.d.popleft()
-        # self.lock.acquire()
-        # if len(self.d) == 0:
-        #     del self.d
-        #     self.d = deque()
-        # self.lock.release()
-        return r           
+        return self.d.popleft()
         
 
     def size(self) -> int:
