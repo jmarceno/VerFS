@@ -70,7 +70,7 @@ datastore_base_path : ['/home/jmarceno/metadata/data01',/run/media/jmarceno/Vaul
 # Notes:
 # 1. This almost double the amount of data taken by the metadata
 # 2. Causes a slight increased in persistence latency, wich can reduce write speeds, but impact here is minimal
-replicate_metadata: False
+replicate_metadata: True
 fsmeta_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata/mirror/fsmeta'
 hashtable_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata/mirror/hashtable'
 
@@ -83,7 +83,7 @@ hashtable_replication_path: '/run/media/jmarceno/Vault/linux_back/metadata/mirro
 # although the system will work with any number of paths.
 # Note that *write spread* is applied here too
 # *mirror_chunk_size_per_GB* should be calculated with the same considerations of *chunk_size_per_gb*
-replicate_data: False
+replicate_data: True
 data_replication_path: ['/run/media/jmarceno/Vault/linux_back/metadata/replication']
 mirror_chunk_size_per_GB : 40
 
