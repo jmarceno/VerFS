@@ -777,6 +777,7 @@ class Operations(pyfuse3.Operations):
 
         
         await self.inodes.commit()
+        hash_table.commit()
         
         return 0
 
@@ -971,6 +972,7 @@ def garbage_collector(stat_msg_queue):
 # A quantidade de referencias indica quantas vezes aquele bloco esta sendo usado, quanto chegar a zero, ele deve ser
 # removido ou sobrescrito
 
+# @profile
 def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
     """
 
@@ -1020,7 +1022,7 @@ def update_index(idx, chunk=None, add=True, stat_msg_queue=None):
             LogEvent(("ERROR",traceback.format_exc()))            
             raise IOError
 
-    hash_table.commit()
+    # hash_table.commit()
     
     return True
 
@@ -1111,12 +1113,12 @@ def write_new_blocks(stat_msg_queue:Queue, daemon:bool):
                 if backend == 'mmap':
                     for ds in datastore:
                         ds.commit_next_write_position()
-                hash_table.commit()
+                # hash_table.commit()
                 time.sleep(0.001)
                 continue
        
 
-    hash_table.commit()
+    # hash_table.commit()
 
 
 # @profile
@@ -1330,7 +1332,7 @@ def usage(stat_msg_queue):
                 
             last_time = time.time()
         time.sleep(3)
-        # prof.dump_stats('get_file_data.lprof')
+        # prof.dump_stats('update_index.lprof')
         # print(".")
 
 '''

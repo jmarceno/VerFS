@@ -138,7 +138,7 @@ class WriteCache():
         if self.size() < self.capacity:
             self.d.append(val)
         else:
-            while self.size() >= self.capacity/2:
+            while self.size() >= self.capacity // 5:
                 time.sleep(1)
             self.d.append(val)
 

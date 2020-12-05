@@ -96,10 +96,10 @@ def datastore_opt():
 
     opts = rocksdb.Options()
     opts.create_if_missing = True
-    opts.max_open_files = 3000
-    opts.write_buffer_size = (0.2 * (1024 ** 3))
-    opts.max_write_buffer_number = 5
-    opts.target_file_size_base = (1024 * (1024 ** 2))
+    opts.max_open_files = 30000
+    opts.write_buffer_size = (2 * (1024 ** 3))
+    opts.max_write_buffer_number = 2
+    opts.target_file_size_base = (256 * (1024 ** 2))
     opts.compression = rocksdb.CompressionType.no_compression
     # opts.delete_obsolete_files_period_micros = 1000000 * 60
     opts.keep_log_file_num = 1
@@ -112,21 +112,21 @@ def datastore_opt():
     opts.avoid_unnecessary_blocking_io = True
     opts.two_write_queues = True
     opts.unordered_write= True
-    opts.max_background_jobs = 4
+    opts.max_background_jobs = 2
     opts.level_compaction_dynamic_level_bytes = True
     opts.max_background_compactions = 10
-    opts.max_background_flushes = 6
-    opts.bytes_per_sync = 1048576*10
+    opts.max_background_flushes = 2
+    opts.bytes_per_sync = 1048576*1
     opts.compaction_pri = rocksdb.CompactionPri().min_overlapping_ratio
     
     
     opts.table_factory = rocksdb.BlockBasedTableFactory(
     checksum='xxhash',
     filter_policy=rocksdb.BloomFilterPolicy(10),
-    block_cache=rocksdb.LRUCache(0 * (1024 ** 3)),
-    block_size=(1024)*1024,
-    block_cache_compressed=rocksdb.LRUCache(0 * (1024 ** 3)),
-    cache_index_and_filter_blocks=False)
+    block_cache=rocksdb.LRUCache(2 * (1024 ** 3)),
+    block_size=(16)*1024,
+    block_cache_compressed=rocksdb.LRUCache(2 * (1024 ** 3)),
+    cache_index_and_filter_blocks=True)
 
     return opts
 

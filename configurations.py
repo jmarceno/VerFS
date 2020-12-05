@@ -34,7 +34,7 @@ small_block_read_cache =LRU(maxlen=confs['small_block_cache_size'])
 allocation_unit = confs['allocation_unit']
 
 mean_blk_size = allocation_unit*confs['mean_blk_size']
-min_blk_size = mean_blk_size//4
+min_blk_size = mean_blk_size // 4
 max_blk_size = mean_blk_size * 8
 small_block_limit = allocation_unit*confs['small_block_limit']    # Any block that after compacted is smaller than this will be stored in memory and persisted by ZODB
 
