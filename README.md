@@ -11,8 +11,9 @@ Sane defaults. The systems defaults have to make sense for the vast majority of 
 As fast and reliable your default Filesystem.
 
 # Requirements
--- Linux (with fuse enabled)
--- Python 3.9
+- Linux (with fuse enabled)
+
+- Python 3.9
 
 # How it works
 VerFS uses Fuse (https://www.kernel.org/doc/html/latest/filesystems/fuse.html) through one of its Python bindings (https://github.com/libfuse/pyfuse3) to intercept all the calls made to mounted volume previously created with it. Once the OS makes as read/writes request, the call is intercepted and the data pipeline kicks in.
@@ -79,7 +80,7 @@ As this is a userspace filesystem without any dedicated kernel component, withou
 
 # F.A.Q
 
- - Why a filesystem in Python? It is slow, it used to much memory, I
+ - Why a filesystem in Python? It is slow, it uses too much memory and I
    don't like snakes
 
 This was the whole point of the "experiment" when it began, as my interest was on the higher level features instead of the lo level kernel stuff that normally takes huge part of an FS development. As for performance Writes and Reads are very fast (70-80% of a standard Ext3, measured on the same media), memory usage can improve but it seems very feasible.
@@ -95,7 +96,3 @@ Not at this stage.
  - Do you have plans to make it production ready?
 
 Not in the near feature, as this is side project that I don't work full time on. That said, I use it for me files at home and the only things preventing it from being out of alpha at least, is the mid file write bug.
-
-
-
-
