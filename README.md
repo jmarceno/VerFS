@@ -76,23 +76,4 @@ At this point, just small (<500GB) volumes where tested due to the lack of a pro
 
 Performance
 
-As this is a userspace filesystem without any dedicated kernel component, without sacrificing reliability (with memory buffers) performance is constrained to be the same as the underlying file system.
-
-# F.A.Q
-
- - Why a filesystem in Python? It is slow, it uses too much memory and I
-   don't like snakes
-
-This was the whole point of the "experiment" when it began, as my interest was on the higher level features instead of the lo level kernel stuff that normally takes huge part of an FS development. As for performance Writes and Reads are very fast (70-80% of a standard Ext3, measured on the same media), memory usage can improve but it seems very feasible.
-
- - Will it have X feature
-
-Just make your case for an enhancement request or send your PR, I'm all in for **cool** stuff.
-
- - Will you support me, if I use it on my Production environment
-
-Not at this stage.
-
- - Do you have plans to make it production ready?
-
-Not in the near feature, as this is side project that I don't work full time on. That said, I use it for me files at home and the only things preventing it from being out of alpha at least, is the mid file write bug.
+As this is a userspace filesystem written in Python...what you thing? :D
