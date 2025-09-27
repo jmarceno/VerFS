@@ -1,3 +1,5 @@
+# This is an old experimment - You can read to the code to see how FUSE works but should not use it.
+
 # VeratyFS
 VerFS is a userspace block filesystem, with inline de-duplication and compression. Data mirroring and Read/Write spread across multiply volumes/disks, written completely in Python (cPython)
 
